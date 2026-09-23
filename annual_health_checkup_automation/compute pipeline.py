@@ -72,6 +72,7 @@ class Compute:
             as_of_date = pd.to_datetime(as_of_date)
 
         if frequency_days:
+            
 
             due_date=last_checkup_date+pd.DateOffset(days=frequency_days)
             timeleft=(due_date-as_of_date).days
@@ -97,4 +98,19 @@ class Compute:
         else:
 
             return "OK"
+
+
+
+
+    def checkup_status_pd(self,df,last_checkup_date, as_of_date):
+        df['days_left'] = (df['due_date'] - df['as_of_date']).dt.days
+        if df['days_left'] <=0:
+            return "Overdue"
         
+        elif 0<df['days_left']<=30:
+        
+            return "Due Soon"
+        
+        else:
+        
+            return "OK"
