@@ -1,0 +1,5 @@
+pandas 
+Numpy
+openpyxl 
+requests 
+schedule
