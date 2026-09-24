@@ -16,14 +16,14 @@ COL = config["column"]
 
 def load_source_data(path=None) -> pd.DataFrame:
     """Read the raw checkup tracker Excel."""
-    path = path or os.path.join(os.path.dirname(__file__), config["Path"]["source_file"])
+    path = path or os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"])
     return pd.read_excel(path)
 
 
 def apply_eligibility_filter(df: pd.DataFrame) -> pd.DataFrame:
     """Drop anyone whose Last Working Date is in the past (already exited)."""
-    lwd_col = COL["last_working_date"]
-    lwd = pd.to_datetime(df[lwd_col])
+
+    lwd = pd.to_datetime(df["Last Working Day (LWD)"])
     today = pd.Timestamp.now().normalize()
     eligible_mask = lwd.isna() | (lwd >= today)
     return df[eligible_mask].copy()
@@ -55,14 +55,16 @@ def filter_already_reminded(df: pd.DataFrame, log: dict) -> pd.DataFrame:
     df = df.copy()
     df["_reminder_key"] = [
         build_reminder_key(empid, due_date)
-        for empid, due_date in zip(df[COL["empid"]], df["due_date"])
+        for empid, due_date in zip(df["Employee ID"], df["Due Date"])
     ]
     already_reminded_mask = df["_reminder_key"].isin(log.keys())
     return df[~already_reminded_mask].copy()
 
 
 def compute_due_date(df):
-    df["Due Date"]=compute.calculate_due_date(df["Checkup Date"])
+    if "Due Date" not in df.columns:
+
+        df["Due Date"]=compute.calculate_due_date(df["Checkup Date"],df["validity"])
     df["Checkup Status"]=compute.checkup_status_pd(df,df["Checkup Date"],as_of_date=datetime.now().date())
     return df
 
@@ -121,10 +123,10 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
     path = path or os.path.join(os.path.dirname(__file__), config["Path"]["reminder_log"])
 
     for _, row in sent_df.iterrows():
-        key = build_reminder_key(row[COL["empid"]], row["due_date"])
+        key = build_reminder_key(row[COL["empid"]], row["Due Date"])
         log[key] = {
             "empid": row[COL["empid"]],
-            "due_date": str(row["due_date"].date()) if pd.notna(row["due_date"]) else None,
+            "due_date": str(row["Due Date"].date()) if pd.notna(row["Due Date"]) else None,
             "reminded_on": str(row["reminded_on"].date()),
         }
 
@@ -135,18 +137,22 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
 def main():
     print("loading source data")
     df=load_source_data()
-    print("loading source data")
+    print("Filtering  data for eligiblility")
     filtered_df=apply_eligibility_filter(df)
-    print("loading source data")
+    print("loading reminder log")
     reminder_log=load_reminder_log()
-    print("loading source data")
-    filtered_df=filter_already_reminded(filtered_df,reminder_log)
-    print("loading source data")
+    print(reminder_log)
+    print("computing due date for the employee")
     due_df=compute_due_date(filtered_df)
-    print("loading source data")
+    print(due_df)
+    print("filtering already reminded employees")
+    filtered_df=filter_already_reminded(filtered_df,reminder_log)
+    print(filtered_df)
+    print("saving processed data")
     processed_df=save_processed(due_df)
-    print("loading source data")
-    update_reminder_log(processed_df,reminder_log)
+    print(processed_df)
+    # print("updating reminder log")
+    # update_reminder_log(processed_df,reminder_log)
 
 
 
