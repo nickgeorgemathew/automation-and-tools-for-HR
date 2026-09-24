@@ -64,6 +64,21 @@ def filter_already_reminded(df: pd.DataFrame, log: dict) -> pd.DataFrame:
     return df[~already_reminded_mask].copy()
 
 
+def save_processed(processed_df):
+    if os.path.exists(config["Path"]["processed_path"]):
+        with open(config["Path"]["processed_path"],"r") as f:
+                processed=json.load(f)
+                processed_df_old=pd.DataFrame(processed)
+        
+        with open(config["Path"]["processed_path"],"w") as f:
+            concated_df=pd.concat(processed_df_old,processed_df)
+            json.dump(concated_df)
+        print(f"Saved processed file to {config["Path"]["processed_path"]} ")
+    else:
+        print(f"file path {config["Path"]["processed_path"]} does not exist")
+
+
+
 def send_reminders(df: pd.DataFrame, test_mode: bool = True) -> pd.DataFrame:
     """
     Sends (or, in test_mode, simulates) a reminder to everyone in df

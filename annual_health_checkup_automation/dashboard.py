@@ -31,3 +31,5 @@ if not Path(config["Path"]["processed_path"]).exists():
 df=pd.DataFrame(config["Path"]["processed_path"])
 
 st.title("Annual Health Checkup Reminder ")
+
+st.dataframe(df.sort_values())
