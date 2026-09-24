@@ -63,12 +63,16 @@ class Compute:
     def checkup_status_pd(self,df,last_checkup_date, as_of_date):
         df['days_left'] = (df['due_date'] - df['as_of_date']).dt.days
         if df['days_left'] <=0:
-            return "Overdue"
+            df['checkup_status']="Overdue"
+            return df
+
         
         elif 0<df['days_left']<=30:
+            df['checkup_status']="Due Soon"
+            return df
         
-            return "Due Soon"
+            
         
         else:
-        
-            return "OK"
+            df['checkup_status']="OK"
+            return df

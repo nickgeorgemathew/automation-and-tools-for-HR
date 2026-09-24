@@ -1,3 +1,6 @@
-Filepath: "" #file path 
+Path:
+      Filepath: "" #file path
+      reminder_log: "annual_health_checkup_automation/reminder_log.json" #file path to reminder log 
 column:
       last working date : "lwd"
+      last checkup date : "checkup date"
