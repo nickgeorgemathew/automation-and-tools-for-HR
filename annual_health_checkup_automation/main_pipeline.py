@@ -1,15 +1,12 @@
-"""
-processing.py
-
-Each function does exactly one job. main.py wires them in order.
-The only impure function is send_reminders (and the file-writing
-in load/update_reminder_log).
-"""
-
 import json
 import os
 import pandas as pd
 import yaml
+from compute_pipeline import Compute
+from datetime import datetime
+
+
+compute=Compute()
 
 with open(os.path.join(os.path.dirname(__file__), "config.yaml"), "r") as f:
     config = yaml.safe_load(f)
@@ -64,6 +61,12 @@ def filter_already_reminded(df: pd.DataFrame, log: dict) -> pd.DataFrame:
     return df[~already_reminded_mask].copy()
 
 
+def compute_due_date(df):
+    df["Due Date"]=compute.calculate_due_date(df["Checkup Date"])
+    df["Checkup Status"]=compute.checkup_status_pd(df,df["Checkup Date"],as_of_date=datetime.now().date())
+    return df
+
+
 def save_processed(processed_df):
     if os.path.exists(config["Path"]["processed_path"]):
         with open(config["Path"]["processed_path"],"r") as f:
@@ -73,9 +76,14 @@ def save_processed(processed_df):
         with open(config["Path"]["processed_path"],"w") as f:
             concated_df=pd.concat(processed_df_old,processed_df)
             json.dump(concated_df)
+        
         print(f"Saved processed file to {config["Path"]["processed_path"]} ")
+        return concated_df
     else:
         print(f"file path {config["Path"]["processed_path"]} does not exist")
+
+
+
 
 
 
@@ -124,3 +132,25 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
         json.dump(log, f, indent=2)
 
     return log
+def main():
+    print("loading source data")
+    df=load_source_data()
+    print("loading source data")
+    filtered_df=apply_eligibility_filter(df)
+    print("loading source data")
+    reminder_log=load_reminder_log()
+    print("loading source data")
+    filtered_df=filter_already_reminded(filtered_df,reminder_log)
+    print("loading source data")
+    due_df=compute_due_date(filtered_df)
+    print("loading source data")
+    processed_df=save_processed(due_df)
+    print("loading source data")
+    update_reminder_log(processed_df,reminder_log)
+
+
+
+
+
+if __name__=="__main__":
+    main()

@@ -1,7 +1,7 @@
 Path:
-      Filepath: "" #file path
+      Filepath: "annual_health_checkup_automation/Tracker_Dummy.xlsx" #file path
       reminder_log: "annual_health_checkup_automation/reminder_log.json" #file path to reminder log 
-      processed_path: ""
+      processed_path: "annual_health_checkup_automation/processed.json"
 column:
       last working date : "lwd"
       last checkup date : "checkup date"

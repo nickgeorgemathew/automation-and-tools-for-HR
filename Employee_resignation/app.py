@@ -148,7 +148,7 @@ month_by_dept_week = (
     .fillna(0)
     .astype(int)
 )
-st.dataframe(month_by_dept_week, use_container_width=True)
+st.dataframe(month_by_dept_week, use_container_width=True,)
  
 st.divider()
  

@@ -4,7 +4,7 @@ import pandas as pd
 class Compute:
     def __init__(self):
         pass
-    def calculate_due_date(self,date:datetime,valid:int)-> pd.Timestamp:
+    def calculate_due_date(self,date:datetime,valid:int=1)-> pd.Timestamp:
         due_date=date+pd.DateOffset(years=valid)
         return due_date
 
