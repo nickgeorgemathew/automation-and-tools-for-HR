@@ -51,7 +51,7 @@ st.title("Annual Health Checkup Reminder ")
 
 
 st.subheader("People in this week")
-people_cols = df.cols.to_list()
+people_cols = df.columns.to_list()
 styled_df = df.style.apply(highlight_rows, axis=1)
 st.dataframe(styled_df)
 

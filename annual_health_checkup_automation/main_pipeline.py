@@ -2,6 +2,7 @@ import json
 import os
 import pandas as pd
 import yaml
+from pathlib import Path
 from compute_pipeline import Compute
 from datetime import datetime
 import utils
@@ -65,30 +66,25 @@ def compute_due_date(df):
     return df
 
 
-def save_processed(processed_df):
-    if os.path.exists(config["Path"]["processed_path"]):
-        with open(config["Path"]["processed_path"],"r") as f:
-                
-                content = f.read().strip()
-                processed_df_old=pd.read_json(content)
-                
-                processed_df_old=pd.to_datetime(processed_df_old["Due Date"])
-                return json.loads(content) if content else {}
-                
-        
-        with open(config["Path"]["processed_path"],"w") as f:
-            concated_df=pd.concat([processed_df_old,processed_df])
-            concated_df.to_json(f,orient="records")
-            
-        
-        print(f"Saved processed file to {config["Path"]["processed_path"]} ")
-        return concated_df
-    else:
-        with open(config["Path"]["processed_path"],"w")as f:
-            processed_df=pd.DataFrame(processed_df)
-            processed_df.to_json(f,orient="records")
-        return processed_df
+def save_processed(processed_df: pd.DataFrame) -> pd.DataFrame:
+    path = config["Path"]["processed_path"]
+    date_cols = ["Due Date", "Date of Joining (DOJ)", "Checkup Date", "Last Working Day (LWD)"]
 
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        processed_df_old = pd.read_json(path)
+        for col in date_cols:
+            if col in processed_df_old.columns:
+                processed_df_old[col] = pd.to_datetime(processed_df_old[col], errors="coerce")
+        processed_df_old = processed_df_old[processed_df_old["Employee ID"].notna()]
+
+        concated_df = pd.concat([processed_df_old, processed_df], ignore_index=True)
+        concated_df = concated_df.drop_duplicates(subset=["Employee ID", "Due Date"], keep="last")
+    else:
+        concated_df = processed_df.copy()
+
+    concated_df.to_json(path, orient="records", date_format="iso")
+    print(f"Saved processed file to {path}")
+    return concated_df
 
 
 
@@ -146,26 +142,33 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
 
 def main():
     print("loading source data")
-    df=utils.read_excel(file_path=os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"]))
-    columns=df.columns.to_list()
+    df = utils.read_excel(file_path=os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"]))
+    columns = df.columns.to_list()
     print(columns)
-    print("Filtering  data for eligiblility")
-    filtered_df=apply_eligibility_filter(df)
-    print("loading reminder log")
-    reminder_log=load_reminder_log()
-    print(reminder_log)
-    print("filtering already reminded employees")
-    print("computing due date for the employee")
-    due_df=compute_due_date(filtered_df)
-    print(due_df)
-    filtered_df=filter_already_reminded(due_df,reminder_log)
-    print(filtered_df)
-    print("saving processed data")
-    processed_df=save_processed(due_df)
-    print(processed_df)
-    print("updating reminder log")
-    update_reminder_log(processed_df,reminder_log)
 
+    print("Filtering data for eligibility")
+    filtered_df = apply_eligibility_filter(df)
+
+    print("loading reminder log")
+    reminder_log = load_reminder_log()
+    print(reminder_log)
+
+    print("computing due date for the employee")
+    due_df = compute_due_date(filtered_df)
+    print(due_df)
+
+    print("saving processed data")
+    processed_df = save_processed(due_df)          # <- put back
+    print(processed_df)
+
+    print("filtering already reminded employees")
+    not_yet_reminded_df = filter_already_reminded(due_df, reminder_log)
+
+    print("sending reminders")
+    sent_df = send_reminders(not_yet_reminded_df, test_mode=True)
+
+    print("updating reminder log")
+    update_reminder_log(sent_df, reminder_log)
 
 
 
