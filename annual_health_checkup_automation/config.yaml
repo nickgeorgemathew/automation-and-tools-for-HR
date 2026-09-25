@@ -1,7 +1,10 @@
 Path:
       Filepath: "Hospital_Employee_Roster_Dummy.xlsx" #file path
-      reminder_log: "reminder_log.json" #file path to reminder log 
-      processed_path: "processed.json"
+      "reminder_log": "reminder_log.json" #file path to reminder log 
+      "processed_path": "processed.json"
 column:
-      last working date : "lwd"
-      last checkup date : "checkup date"
+      "last working date" : "Last Working Day (LWD)"
+      "last checkup date" : "Checkup Date"
+      "empid": "Employee ID"
+      "emp name": "Employee Name"
+      "email": "Email ID"

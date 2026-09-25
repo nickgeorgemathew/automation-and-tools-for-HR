@@ -1,18 +1,28 @@
 from datetime import datetime
 import pandas as pd
+import numpy as np
+import utils
 
 class Compute:
     def __init__(self):
         pass
-    def calculate_due_date(self,date:datetime,valid:int=1)-> pd.Timestamp:
-        due_date=date+pd.DateOffset(years=valid)
-        return due_date
+    def calculate_due_date(self,df) -> pd.Timestamp:
+        
+        def cal(row):
+            date=row["Checkup Date"]+pd.DateOffset(years=row["validity"])
+            return date
+        df["Due Date"]=df.apply(cal,axis=1)
+        result = df.apply(cal, axis=1)
+        print(type(result), result.dtype if hasattr(result, "dtype") else "no dtype")
+        df["Due Date"] = pd.to_datetime(result)
+            
+        return df
 
 
         
-    def checkup_status(self,last_checkup_date, frequency_days,frequency_years, as_of_date):
+    def checkup_status(self,last_checkup_date, frequency, as_of_date):
         """
-        pass frequency days if cycle is day wise or years if years wise
+        pass frequency in years
         Returns 'Overdue', 'Due Soon', or 'OK' based on how far
         as_of_date is past last_checkup_date + frequency_days.
         """
@@ -49,7 +59,7 @@ class Compute:
         if timeleft <=0:
             return "Overdue"
         
-        elif 0<timeleft<=30:
+        elif 0<=timeleft<=30:
 
             return "Due Soon"
         
@@ -60,19 +70,22 @@ class Compute:
 
 
 
-    def checkup_status_pd(self,df,last_checkup_date, as_of_date):
-        df['days_left'] = (df['due_date'] - df['as_of_date']).dt.days
-        if df['days_left'] <=0:
-            df['checkup_status']="Overdue"
-            return df
+    def checkup_status_pd(self,df,as_of_date):
+        def calculate_days_left(row):
+            days_left=(pd.to_datetime(row['Checkup Date']) - pd.to_datetime(as_of_date)).days
+            return days_left
 
+        df['days_left'] = df.apply(calculate_days_left,axis=1)
         
-        elif 0<df['days_left']<=30:
-            df['checkup_status']="Due Soon"
-            return df
         
+        def determine_status(row):
+            days = row['days_left']
+            if days <= 0:
+                return "Overdue"
+            elif 0 <= days <= 30:
+                return "Due Soon"
+            else:
+                return "OK"
             
-        
-        else:
-            df['checkup_status']="OK"
-            return df
+        df["checkup_status"]=df.apply(determine_status,axis=1)
+        return df

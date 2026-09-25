@@ -4,20 +4,20 @@ import pandas as pd
 import yaml
 from compute_pipeline import Compute
 from datetime import datetime
+import utils
 
 
 compute=Compute()
 
-with open(os.path.join(os.path.dirname(__file__), "config.yaml"), "r") as f:
-    config = yaml.safe_load(f)
-
-COL = config["column"]
+config = utils.load_config(config_path=os.path.join(os.path.dirname(__file__), "config.yaml"))
 
 
-def load_source_data(path=None) -> pd.DataFrame:
-    """Read the raw checkup tracker Excel."""
-    path = path or os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"])
-    return pd.read_excel(path)
+
+
+# def load_source_data(path=None) -> pd.DataFrame:
+#     """Read the raw checkup tracker Excel."""
+#     path = path or os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"])
+#     return pd.read_excel(path)
 
 
 def apply_eligibility_filter(df: pd.DataFrame) -> pd.DataFrame:
@@ -35,12 +35,8 @@ def load_reminder_log(path=None) -> dict:
     Returns {} on first-ever run (file doesn't exist yet).
     """
     path = path or os.path.join(os.path.dirname(__file__), config["Path"]["reminder_log"])
-    try:
-        with open(path, "r") as f:
-            content = f.read().strip()
-            return json.loads(content) if content else {}
-    except FileNotFoundError:
-        return {}
+    return utils.load_json(file_path=path)
+   
 
 
 def build_reminder_key(empid, due_date) -> str:
@@ -64,25 +60,34 @@ def filter_already_reminded(df: pd.DataFrame, log: dict) -> pd.DataFrame:
 def compute_due_date(df):
     if "Due Date" not in df.columns:
 
-        df["Due Date"]=compute.calculate_due_date(df["Checkup Date"],df["validity"])
-    df["Checkup Status"]=compute.checkup_status_pd(df,df["Checkup Date"],as_of_date=datetime.now().date())
+        df=compute.calculate_due_date(df=df)
+    df=compute.checkup_status_pd(df,as_of_date=datetime.now().date())
     return df
 
 
 def save_processed(processed_df):
     if os.path.exists(config["Path"]["processed_path"]):
         with open(config["Path"]["processed_path"],"r") as f:
-                processed=json.load(f)
-                processed_df_old=pd.DataFrame(processed)
+                
+                content = f.read().strip()
+                processed_df_old=pd.read_json(content)
+                
+                processed_df_old=pd.to_datetime(processed_df_old["Due Date"])
+                return json.loads(content) if content else {}
+                
         
         with open(config["Path"]["processed_path"],"w") as f:
-            concated_df=pd.concat(processed_df_old,processed_df)
-            json.dump(concated_df)
+            concated_df=pd.concat([processed_df_old,processed_df])
+            concated_df.to_json(f,orient="records")
+            
         
         print(f"Saved processed file to {config["Path"]["processed_path"]} ")
         return concated_df
     else:
-        print(f"file path {config["Path"]["processed_path"]} does not exist")
+        with open(config["Path"]["processed_path"],"w")as f:
+            processed_df=pd.DataFrame(processed_df)
+            processed_df.to_json(f,orient="records")
+        return processed_df
 
 
 
@@ -99,8 +104,8 @@ def send_reminders(df: pd.DataFrame, test_mode: bool = True) -> pd.DataFrame:
 
     if test_mode:
         for _, row in to_send.iterrows():
-            print(f"[TEST MODE] Would email {row[COL['email']]} "
-                  f"({row[COL['empid']]}) — status: {row['status']}, "
+            print(f"[TEST MODE] Would email {row[config["column"]['email']]} "
+                  f"({row[config["column"]['empid']]}) — status: {row['status']}, "
                   f"due {row['due_date'].date() if pd.notna(row['due_date']) else 'N/A'}")
     else:
         import smtplib
@@ -122,37 +127,44 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
     """Adds every sent row's key to the log and writes it back to disk."""
     path = path or os.path.join(os.path.dirname(__file__), config["Path"]["reminder_log"])
 
+
     for _, row in sent_df.iterrows():
-        key = build_reminder_key(row[COL["empid"]], row["Due Date"])
+        key = build_reminder_key(row[config["column"]["empid"]], row["Due Date"])
         log[key] = {
-            "empid": row[COL["empid"]],
+            "empid": row[config["column"]["empid"]],
             "due_date": str(row["Due Date"].date()) if pd.notna(row["Due Date"]) else None,
-            "reminded_on": str(row["reminded_on"].date()),
+            
         }
+    utils.dump_json(data=log,file_path=path)
 
-    with open(path, "w") as f:
-        json.dump(log, f, indent=2)
-
+       
     return log
+
+
+
+
+
 def main():
     print("loading source data")
-    df=load_source_data()
+    df=utils.read_excel(file_path=os.path.join(os.path.dirname(__file__), config["Path"]["Filepath"]))
+    columns=df.columns.to_list()
+    print(columns)
     print("Filtering  data for eligiblility")
     filtered_df=apply_eligibility_filter(df)
     print("loading reminder log")
     reminder_log=load_reminder_log()
     print(reminder_log)
+    print("filtering already reminded employees")
     print("computing due date for the employee")
     due_df=compute_due_date(filtered_df)
     print(due_df)
-    print("filtering already reminded employees")
-    filtered_df=filter_already_reminded(filtered_df,reminder_log)
+    filtered_df=filter_already_reminded(due_df,reminder_log)
     print(filtered_df)
     print("saving processed data")
     processed_df=save_processed(due_df)
     print(processed_df)
-    # print("updating reminder log")
-    # update_reminder_log(processed_df,reminder_log)
+    print("updating reminder log")
+    update_reminder_log(processed_df,reminder_log)
 
 
 
