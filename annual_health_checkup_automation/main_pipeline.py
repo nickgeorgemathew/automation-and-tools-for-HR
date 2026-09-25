@@ -164,11 +164,11 @@ def main():
     print("filtering already reminded employees")
     not_yet_reminded_df = filter_already_reminded(due_df, reminder_log)
 
-    print("sending reminders")
-    sent_df = send_reminders(not_yet_reminded_df, test_mode=True)
+    # print("sending reminders")
+    # sent_df = send_reminders(not_yet_reminded_df, test_mode=True)
 
     print("updating reminder log")
-    update_reminder_log(sent_df, reminder_log)
+    update_reminder_log(not_yet_reminded_df, reminder_log)
 
 
 
