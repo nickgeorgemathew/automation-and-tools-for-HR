@@ -27,6 +27,7 @@ class Compute:
             return (due_date - as_of_date).days
         as_of_date=pd.to_datetime(as_of_date)
         df['days_left'] = df.apply(calculate_days_left,axis=1)
+
         
         
         def determine_status(row):

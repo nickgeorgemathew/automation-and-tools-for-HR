@@ -126,9 +126,11 @@ def update_reminder_log(sent_df: pd.DataFrame, log: dict, path=None) -> dict:
 
     for _, row in sent_df.iterrows():
         key = build_reminder_key(row[config["column"]["empid"]], row["Due Date"])
+        #if email is(send_reminder) is wired up and used add "reminded_on":row['due_date'].date() if pd.notna(row['due_date']) else 'N/A' 
         log[key] = {
             "empid": row[config["column"]["empid"]],
             "due_date": str(row["Due Date"].date()) if pd.notna(row["Due Date"]) else None,
+            
             
         }
     utils.dump_json(data=log,file_path=path)
