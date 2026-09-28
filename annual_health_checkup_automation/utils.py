@@ -16,9 +16,11 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict
-
+from datetime import datetime
 import pandas as pd
 import yaml
+import os
+import tempfile
 
 # ---------------------------------------------------------------------------
 # Logger configuration
@@ -111,5 +113,46 @@ def load_json(file_path: str | Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         content = f.read().strip()
         return json.loads(content) if content else {}
+
+
+
+
+
+# Resolve paths consistently regardless of working directory
+BASE_DIR = Path(__file__).resolve().parent
+
+def get_path(relative_path: str) -> Path:
+    """Returns an absolute path relative to the project root."""
+    return BASE_DIR / relative_path
+
+def build_reminder_key(emp_id: str, due_date: str) -> str:
+    """Generates a stable key that auto-resets when the due date changes."""
+    clean_date = str(due_date).split("T")[0].split(" ")[0]
+    return f"{emp_id}_{clean_date}"
+
+def load_reminder_log(file_path: Path) -> dict:
+    """Safely loads the JSON log, handling missing files and corruption."""
+    Path(file_path)
+    if not file_path.exists():
+        return {}
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+def save_reminder_log_atomic(data: dict, file_path: Path) -> None:
+    """Writes to a temporary file first and replaces atomically to prevent corruption."""
+    Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create temp file in the same directory for atomic cross-filesystem replace
+    with tempfile.NamedTemporaryFile("w", dir=file_path.parent, delete=False, encoding="utf-8") as tf:
+        json.dump(data, tf, indent=4, default=str)
+        temp_name = tf.name
+        
+    os.replace(temp_name, file_path)
+
+
 
 # End of utils.py

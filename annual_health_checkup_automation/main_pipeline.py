@@ -169,9 +169,7 @@ def main():
     # print("sending reminders")
     # sent_df = send_reminders(not_yet_reminded_df, test_mode=True)
 
-    print("updating reminder log")
-    update_reminder_log(not_yet_reminded_df, reminder_log)
-
+    
 
 
 
