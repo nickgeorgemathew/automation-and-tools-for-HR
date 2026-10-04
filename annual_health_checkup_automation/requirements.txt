@@ -3,3 +3,5 @@ Numpy
 openpyxl 
 requests 
 schedule
+pyyaml
+streamlit
