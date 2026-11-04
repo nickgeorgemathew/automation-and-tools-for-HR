@@ -1,0 +1,28 @@
+matplotlib
+fastapi
+uvicorn
+werkzeug
+filetype
+# Core Data Processing & Manipulation
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Data Validation & Schema Contracts
+pydantic>=2.0.0
+
+# Embedded Relational Database & Warehousing
+duckdb>=0.9.0
+
+# Interactive Dashboard & UI Layer
+streamlit>=1.28.0
+
+# Advanced Analytics & Anomaly Detection
+scikit-learn>=1.3.0
+scipy>=1.10.0
+
+# Excel File Support (for reading/writing workbook feeds)
+openpyxl>=3.1.0
+
+# Testing & Quality Assurance
+pytest>=7.0.0
+flake8>=6.0.0

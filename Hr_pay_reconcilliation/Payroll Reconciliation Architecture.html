@@ -1,0 +1,774 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Payroll Reconciliation Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: sticky header, scrollable content, full-width bands */
+  :root {
+    --bg: #F7F8FA;
+    --surface: #FFFFFF;
+    --border: #E2E6ED;
+    --fg: #1A1D23;
+    --fg-muted: #6B7280;
+    --accent: #1A56DB;
+    --accent-light: #EBF0FD;
+    --red: #DC2626;
+    --red-light: #FEE2E2;
+    --yellow: #D97706;
+    --yellow-light: #FEF3C7;
+    --green: #059669;
+    --green-light: #D1FAE5;
+    --blue-soft: #3B82F6;
+
+    --font-display: 'DM Sans', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F1117;
+      --surface: #1A1D26;
+      --border: #2A2E3A;
+      --fg: #E8ECF4;
+      --fg-muted: #8892A4;
+      --accent: #4B7BF5;
+      --accent-light: #1A2340;
+      --red: #EF4444;
+      --red-light: #2D1515;
+      --yellow: #F59E0B;
+      --yellow-light: #2D2010;
+      --green: #10B981;
+      --green-light: #0D2318;
+      --blue-soft: #60A5FA;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F1117;
+    --surface: #1A1D26;
+    --border: #2A2E3A;
+    --fg: #E8ECF4;
+    --fg-muted: #8892A4;
+    --accent: #4B7BF5;
+    --accent-light: #1A2340;
+    --red: #EF4444;
+    --red-light: #2D1515;
+    --yellow: #F59E0B;
+    --yellow-light: #2D2010;
+    --green: #10B981;
+    --green-light: #0D2318;
+    --blue-soft: #60A5FA;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.6;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 48px;
+  }
+
+  /* Header */
+  .page-header {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    background: var(--surface);
+    z-index: 11;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .header-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--accent-light);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .page-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  /* Nav tabs */
+  .nav-tabs {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nav-tabs::-webkit-scrollbar { display: none; }
+  .nav-tab {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--fg-muted);
+    border: 1px solid transparent;
+    background: none;
+    transition: all 0.15s;
+  }
+  .nav-tab.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .nav-tab:hover:not(.active) { background: var(--border); color: var(--fg); }
+
+  /* Sections */
+  .section { display: none; padding-top: 28px; }
+  .section.active { display: block; }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 4px;
+    text-wrap: balance;
+  }
+  .section-subtitle {
+    font-size: 13px;
+    color: var(--fg-muted);
+    margin-bottom: 24px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin-bottom: 16px;
+  }
+
+  /* SVG diagrams */
+  figure { margin: 0; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    font-size: 12px;
+    color: var(--fg-muted);
+    text-align: center;
+    margin-top: 10px;
+    font-style: italic;
+  }
+
+  /* Error type table */
+  .error-grid {
+    display: grid;
+    gap: 10px;
+  }
+  .error-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    align-items: start;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .severity-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .sev-red { background: var(--red); }
+  .sev-yellow { background: var(--yellow); }
+  .sev-blue { background: var(--blue-soft); }
+  .error-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 3px;
+  }
+  .error-desc { font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+  .error-action {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .action-red { background: var(--red-light); color: var(--red); }
+  .action-yellow { background: var(--yellow-light); color: var(--yellow); }
+  .action-blue { background: var(--accent-light); color: var(--accent); }
+
+  /* File map */
+  .file-tree {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 2;
+    color: var(--fg-muted);
+  }
+  .file-done { color: var(--green); }
+  .file-next { color: var(--accent); font-weight: 600; }
+  .file-pending { color: var(--fg-muted); }
+  .file-comment { color: var(--fg-muted); opacity: 0.6; }
+
+  /* Dashboard wireframe */
+  .wireframe-page {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .wireframe-header {
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 12px;
+    letter-spacing: 0.04em;
+  }
+  .wireframe-body { padding: 12px; }
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .kpi-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .kpi-label { font-size: 10px; color: var(--fg-muted); margin-bottom: 2px; }
+  .kpi-value { font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .kpi-value.red { color: var(--red); }
+  .kpi-value.green { color: var(--green); }
+  .wireframe-row {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .wireframe-row.two { grid-template-columns: 1fr 1fr; }
+  .wireframe-row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .wf-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--fg-muted);
+    min-height: 56px;
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .wf-block-title { font-weight: 600; color: var(--fg); font-size: 11px; }
+  .mismatch-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .mismatch-row:last-child { border-bottom: none; }
+  .chip {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .chip-red { background: var(--red-light); color: var(--red); }
+  .chip-yellow { background: var(--yellow-light); color: var(--yellow); }
+  .chip-blue { background: var(--accent-light); color: var(--accent); }
+
+  /* Two-col layout for wider screens */
+  @media (min-width: 700px) {
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .two-col .card { margin-bottom: 0; }
+  }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<div class="page-header">
+  <div class="header-left">
+    <span class="page-title">Hospital Pay Reconciliation</span>
+    <span class="header-badge">Architecture</span>
+  </div>
+  <nav class="nav-tabs" role="tablist">
+    <button class="nav-tab active" onclick="show('flow', this)">Data Flow</button>
+    <button class="nav-tab" onclick="show('errors', this)">Error Types</button>
+    <button class="nav-tab" onclick="show('dashboard', this)">Dashboard</button>
+    <button class="nav-tab" onclick="show('files', this)">File Map</button>
+  </nav>
+</div>
+
+<!-- TAB 1: DATA FLOW -->
+<div class="section active" id="tab-flow">
+  <p class="section-title">End-to-End Data Flow</p>
+  <p class="section-subtitle">Three source files enter. Every record exits with a verdict and a recommended action.</p>
+
+  <div class="card">
+    <figure>
+      <svg viewBox="0 0 720 560" role="img" aria-label="Data flow from three CSV sources through validator, ingestion, DuckDB warehouse, reconciliation engine, insight engine, to Streamlit dashboard" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="currentColor" opacity="0.55"/>
+          </marker>
+          <marker id="arr-accent" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#1A56DB"/>
+          </marker>
+          <marker id="arr-red" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#DC2626"/>
+          </marker>
+        </defs>
+
+        <!-- SOURCE FILES ROW -->
+        <text x="360" y="22" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5" font-family="DM Sans, sans-serif" letter-spacing="0.08em">SOURCE FILES</text>
+
+        <!-- HRIS -->
+        <rect x="30" y="32" width="130" height="52" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5"/>
+        <text x="95" y="53" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">hris_export.csv</text>
+        <text x="95" y="69" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55" font-family="JetBrains Mono, monospace">80 employees</text>
+        <text x="95" y="82" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.45" font-family="JetBrains Mono, monospace">status · salary · PAN</text>
+
+        <!-- Payroll -->
+        <rect x="295" y="32" width="130" height="52" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5"/>
+        <text x="360" y="53" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">payroll_register.csv</text>
+        <text x="360" y="69" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55" font-family="JetBrains Mono, monospace">56 disbursements</text>
+        <text x="360" y="82" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.45" font-family="JetBrains Mono, monospace">gross · deductions · net</text>
+
+        <!-- GL -->
+        <rect x="560" y="32" width="130" height="52" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5"/>
+        <text x="625" y="53" text-anchor="middle" font-size="12" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">gl_dump.csv</text>
+        <text x="625" y="69" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.55" font-family="JetBrains Mono, monospace">56 GL postings</text>
+        <text x="625" y="82" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.45" font-family="JetBrains Mono, monospace">amount posted · date</text>
+
+        <!-- Converge arrows to validator -->
+        <line x1="95" y1="84" x2="290" y2="148" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="360" y1="84" x2="360" y2="140" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="625" y1="84" x2="430" y2="148" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- VALIDATOR -->
+        <rect x="200" y="148" width="320" height="54" rx="8" fill="#1A56DB" fill-opacity="0.08" stroke="#1A56DB" stroke-width="1.5"/>
+        <text x="360" y="169" text-anchor="middle" font-size="13" font-weight="700" fill="#1A56DB" font-family="DM Sans, sans-serif">validator.py</text>
+        <text x="360" y="186" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">Pydantic schema · Employee_ID regex · type checks</text>
+
+        <!-- Quarantine branch -->
+        <line x1="520" y1="175" x2="598" y2="175" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arr-red)"/>
+        <rect x="598" y="155" width="110" height="40" rx="6" fill="none" stroke="#DC2626" stroke-opacity="0.4" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="653" y="171" text-anchor="middle" font-size="11" font-weight="600" fill="#DC2626" font-family="DM Sans, sans-serif">/quarantine/</text>
+        <text x="653" y="186" text-anchor="middle" font-size="10" fill="#DC2626" opacity="0.7" font-family="JetBrains Mono, monospace">+ pipeline_errors.log</text>
+
+        <!-- Valid path arrow -->
+        <line x1="360" y1="202" x2="360" y2="232" stroke="#1A56DB" stroke-width="1.8" marker-end="url(#arr-accent)"/>
+        <text x="370" y="220" font-size="10" fill="#1A56DB" font-family="JetBrains Mono, monospace">valid only</text>
+
+        <!-- INGESTION -->
+        <rect x="200" y="232" width="320" height="54" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5"/>
+        <text x="360" y="253" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">ingestion.py</text>
+        <text x="360" y="270" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">MD5 hash check · idempotent · moves to /archive/</text>
+
+        <!-- DUCKDB -->
+        <line x1="360" y1="286" x2="360" y2="316" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="160" y="316" width="400" height="68" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.2" stroke-width="1.5"/>
+        <text x="360" y="336" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" opacity="0.5" font-family="DM Sans, sans-serif" letter-spacing="0.06em">DUCKDB WAREHOUSE  ·  warehouse.duckdb</text>
+        <rect x="175" y="344" width="100" height="28" rx="4" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.2" stroke-width="1"/>
+        <text x="225" y="362" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="JetBrains Mono, monospace">dim_employees</text>
+        <rect x="310" y="344" width="100" height="28" rx="4" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.2" stroke-width="1"/>
+        <text x="360" y="362" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="JetBrains Mono, monospace">fact_payroll</text>
+        <rect x="445" y="344" width="100" height="28" rx="4" fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.2" stroke-width="1"/>
+        <text x="495" y="362" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor" font-family="JetBrains Mono, monospace">fact_reconcil.</text>
+
+        <!-- RECONCILIATION -->
+        <line x1="360" y1="384" x2="360" y2="412" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <rect x="130" y="412" width="460" height="64" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.5"/>
+        <text x="360" y="432" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">reconciliation.py  +  insight_engine.py</text>
+        <text x="360" y="449" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">FULL OUTER JOIN  ·  3-way triangle check  ·  Z-score anomaly detection</text>
+        <text x="360" y="465" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">variance categorisation  ·  cost pattern analysis  ·  recommended actions</text>
+
+        <!-- DASHBOARD -->
+        <line x1="360" y1="476" x2="360" y2="504" stroke="#1A56DB" stroke-width="1.8" marker-end="url(#arr-accent)"/>
+
+        <rect x="100" y="504" width="520" height="44" rx="8" fill="#1A56DB" fill-opacity="0.08" stroke="#1A56DB" stroke-width="1.5"/>
+        <text x="360" y="522" text-anchor="middle" font-size="13" font-weight="700" fill="#1A56DB" font-family="DM Sans, sans-serif">app.py  —  Streamlit Dashboard</text>
+        <text x="360" y="539" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">Overview  ·  Mismatch Drilldown  ·  Cost Intelligence  ·  Audit Trail</text>
+      </svg>
+      <figcaption>Three source files reconciled in one pipeline. Bad files are quarantined before they touch the database. The dashboard is the only surface HR ever sees.</figcaption>
+    </figure>
+  </div>
+
+  <!-- 3-way triangle -->
+  <div class="card">
+    <p class="card-title">The Three-Way Reconciliation Triangle</p>
+    <figure>
+      <svg viewBox="0 0 520 220" role="img" aria-label="Three-way reconciliation triangle between HRIS, Payroll, and GL with three distinct checks" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr2" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+            <polygon points="0 0, 7 3, 0 6" fill="currentColor" opacity="0.5"/>
+          </marker>
+        </defs>
+
+        <!-- Three nodes -->
+        <rect x="190" y="16" width="140" height="44" rx="8" fill="currentColor" fill-opacity="0.07" stroke="currentColor" stroke-opacity="0.3" stroke-width="1.5"/>
+        <text x="260" y="34" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">HRIS</text>
+        <text x="260" y="50" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5" font-family="JetBrains Mono, monospace">source of truth</text>
+
+        <rect x="36" y="150" width="140" height="44" rx="8" fill="currentColor" fill-opacity="0.07" stroke="currentColor" stroke-opacity="0.3" stroke-width="1.5"/>
+        <text x="106" y="168" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">Payroll Register</text>
+        <text x="106" y="184" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5" font-family="JetBrains Mono, monospace">what was computed</text>
+
+        <rect x="344" y="150" width="140" height="44" rx="8" fill="currentColor" fill-opacity="0.07" stroke="currentColor" stroke-opacity="0.3" stroke-width="1.5"/>
+        <text x="414" y="168" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">General Ledger</text>
+        <text x="414" y="184" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5" font-family="JetBrains Mono, monospace">what was booked</text>
+
+        <!-- Check A: HRIS ↔ Payroll -->
+        <line x1="196" y1="56" x2="146" y2="150" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <line x1="146" y1="150" x2="196" y2="56" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="88" y="88" width="120" height="34" rx="5" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+        <text x="148" y="102" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">Check A</text>
+        <text x="148" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">headcount + salary</text>
+
+        <!-- Check B: Payroll ↔ GL -->
+        <line x1="176" y1="172" x2="344" y2="172" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <line x1="344" y1="172" x2="176" y2="172" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="212" y="156" width="96" height="34" rx="5" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+        <text x="260" y="170" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">Check B</text>
+        <text x="260" y="183" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">net pay vs posted</text>
+
+        <!-- Check C: HRIS ↔ GL -->
+        <line x1="324" y1="56" x2="374" y2="150" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <line x1="374" y1="150" x2="324" y2="56" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="312" y="88" width="120" height="34" rx="5" fill="var(--surface)" stroke="var(--border)" stroke-width="1"/>
+        <text x="372" y="102" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor" font-family="DM Sans, sans-serif">Check C</text>
+        <text x="372" y="115" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6" font-family="JetBrains Mono, monospace">end-to-end exposure</text>
+      </svg>
+      <figcaption>All three legs must close. Most tools only do Check A. Check C is what finance auditors actually want.</figcaption>
+    </figure>
+  </div>
+</div>
+
+<!-- TAB 2: ERROR TYPES -->
+<div class="section" id="tab-errors">
+  <p class="section-title">Error Type Taxonomy</p>
+  <p class="section-subtitle">Every discrepancy maps to exactly one bucket. Each bucket has a fixed severity and a specific recommended action — not a generic flag.</p>
+
+  <div class="card">
+    <div class="error-grid">
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-red"></div></div>
+        <div>
+          <div class="error-label">CRITICAL_TERMINATED_PAID</div>
+          <div class="error-desc">Employee status = Terminated in HRIS, but Gross_Pay &gt; 0 in Payroll. Money left the bank for someone who no longer works here.</div>
+        </div>
+        <span class="error-action action-red">Initiate recovery</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-red"></div></div>
+        <div>
+          <div class="error-label">ORPHAN_PAYROLL_RECORD</div>
+          <div class="error-desc">Employee_ID exists in Payroll but has no matching record in HRIS at all. Could be a ghost employee or a data entry error.</div>
+        </div>
+        <span class="error-action action-red">Fraud escalation</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-yellow"></div></div>
+        <div>
+          <div class="error-label">BASE_RATE_MISMATCH</div>
+          <div class="error-desc">HRIS Base_Salary ≠ Payroll Base_Salary. Either an increment was approved in HRIS but not reflected in payroll, or payroll was manually edited.</div>
+        </div>
+        <span class="error-action action-yellow">Check increment letter</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-yellow"></div></div>
+        <div>
+          <div class="error-label">OFF_CYCLE_MANUAL_ADJ</div>
+          <div class="error-desc">Payment_Mode = Manual_Adjustment with no corresponding HRIS approval record. Common for ad-hoc bonuses or corrections processed outside the normal run.</div>
+        </div>
+        <span class="error-action action-yellow">Get retroactive approval</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-yellow"></div></div>
+        <div>
+          <div class="error-label">GL_NET_MISMATCH</div>
+          <div class="error-desc">GL_Amount_Posted ≠ Payroll Net_Pay for the same Employee_ID and Pay_Period. What was computed vs what was booked in finance don't agree.</div>
+        </div>
+        <span class="error-action action-yellow">Correction journal entry</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-blue"></div></div>
+        <div>
+          <div class="error-label">ESI_BOUNDARY_RISK</div>
+          <div class="error-desc">Employee's gross is between ₹18,000–₹21,000. Overtime this month may push them past the ESI eligibility threshold of ₹21,000, changing their deduction profile next month.</div>
+        </div>
+        <span class="error-action action-blue">Monitor next cycle</span>
+      </div>
+
+      <div class="error-row">
+        <div><div class="severity-dot sev-blue"></div></div>
+        <div>
+          <div class="error-label">OT_ANOMALY (Z-score)</div>
+          <div class="error-desc">Overtime or allowance component deviates &gt;2.5 standard deviations from the department mean. Catches spikes hardcoded rules miss — a ₹200 intern spike is anomalous; a ₹2,000 senior doctor spike is normal.</div>
+        </div>
+        <span class="error-action action-blue">Review shift roster</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Indian Statutory Compliance Checks</p>
+    <div class="error-grid">
+      <div class="error-row">
+        <div><div class="severity-dot sev-yellow"></div></div>
+        <div>
+          <div class="error-label">PF / EPF</div>
+          <div class="error-desc">12% employee + 12% employer on basic, capped at ₹15,000 wage. Verify UAN mapping and that PF_Deduction matches the formula exactly.</div>
+        </div>
+        <span class="error-action action-yellow">PF reconciliation</span>
+      </div>
+      <div class="error-row">
+        <div><div class="severity-dot sev-yellow"></div></div>
+        <div>
+          <div class="error-label">Professional Tax (Karnataka)</div>
+          <div class="error-desc">₹200/month above ₹15,000 gross. Multi-location hospitals may incorrectly apply another state's slab when merging branch data.</div>
+        </div>
+        <span class="error-action action-yellow">Slab check</span>
+      </div>
+      <div class="error-row">
+        <div><div class="severity-dot sev-blue"></div></div>
+        <div>
+          <div class="error-label">TDS (Old vs New Regime)</div>
+          <div class="error-desc">Employee declarations change which slab applies. If the regime flag in HRIS differs from payroll's assumption, TDS will be wrong across the full year.</div>
+        </div>
+        <span class="error-action action-blue">Declaration audit</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 3: DASHBOARD WIREFRAME -->
+<div class="section" id="tab-dashboard">
+  <p class="section-title">Dashboard — 4 Pages</p>
+  <p class="section-subtitle">What HR actually sees. Every page has one job.</p>
+
+  <!-- Page 1 -->
+  <div class="wireframe-page">
+    <div class="wireframe-header">PAGE 1 — Monthly Overview (AGM's page)</div>
+    <div class="wireframe-body">
+      <div class="kpi-row">
+        <div class="kpi-tile"><div class="kpi-label">Total Payroll</div><div class="kpi-value">₹48.3L</div></div>
+        <div class="kpi-tile"><div class="kpi-label">Headcount</div><div class="kpi-value">76</div></div>
+        <div class="kpi-tile"><div class="kpi-label">Flagged Amount</div><div class="kpi-value red">₹2.1L</div></div>
+        <div class="kpi-tile"><div class="kpi-label">Critical Flags</div><div class="kpi-value red">4</div></div>
+        <div class="kpi-tile"><div class="kpi-label">PF Liability</div><div class="kpi-value">₹3.1L</div></div>
+        <div class="kpi-tile"><div class="kpi-label">Compliance</div><div class="kpi-value green">✓ OK</div></div>
+      </div>
+      <div class="wireframe-row two">
+        <div class="wf-block"><div class="wf-block-title">Dept-wise Spend (bar chart)</div><span>Emergency ██████ ₹8.2L</span><span>ICU ████████ ₹10.1L</span><span>Admin ████ ₹5.4L</span></div>
+        <div class="wf-block"><div class="wf-block-title">Pay Component Mix (donut)</div><span>Basic 42% · HRA 20%</span><span>DA 8% · OT 6% · Other 24%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page 2 -->
+  <div class="wireframe-page">
+    <div class="wireframe-header">PAGE 2 — Mismatch Drilldown (reconciliation work page)</div>
+    <div class="wireframe-body">
+      <div class="wireframe-row three" style="margin-bottom:10px;">
+        <div class="wf-block" style="min-height:32px;"><span>Filter: Department ▾</span></div>
+        <div class="wf-block" style="min-height:32px;"><span>Filter: Error Type ▾</span></div>
+        <div class="wf-block" style="min-height:32px;"><span>Amount ≥ ₹ [    ]</span></div>
+      </div>
+      <div class="wf-block" style="min-height:auto;">
+        <div class="wf-block-title" style="margin-bottom:6px;">Flagged Records</div>
+        <div class="mismatch-row"><span style="font-family:var(--font-mono);font-size:11px;">E0030</span><span>Asha Kumar</span><span class="chip chip-red">TERMINATED_PAID</span><span style="font-variant-numeric:tabular-nums;">₹45,200</span><span style="color:var(--red);font-size:10px;">Initiate recovery →</span></div>
+        <div class="mismatch-row"><span style="font-family:var(--font-mono);font-size:11px;">E9901</span><span>Ghost Employee</span><span class="chip chip-red">ORPHAN_RECORD</span><span style="font-variant-numeric:tabular-nums;">₹32,400</span><span style="color:var(--red);font-size:10px;">Fraud review →</span></div>
+        <div class="mismatch-row"><span style="font-family:var(--font-mono);font-size:11px;">E0015</span><span>Ravi Pillai</span><span class="chip chip-yellow">RATE_MISMATCH</span><span style="font-variant-numeric:tabular-nums;">₹8,600</span><span style="color:var(--yellow);font-size:10px;">Check increment →</span></div>
+        <div class="mismatch-row"><span style="font-family:var(--font-mono);font-size:11px;">E0041</span><span>Priya Nair</span><span class="chip chip-blue">OT_ANOMALY</span><span style="font-variant-numeric:tabular-nums;">₹6,100</span><span style="color:var(--blue-soft);font-size:10px;">Review roster →</span></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="error-action action-red" style="cursor:pointer;">✓ Mark Selected Resolved</span>
+        <span class="error-action action-blue" style="cursor:pointer;">⬇ Export to CSV</span>
+        <span class="error-action action-yellow" style="cursor:pointer;">📄 Generate Audit Memo</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page 3 -->
+  <div class="wireframe-page">
+    <div class="wireframe-header">PAGE 3 — Cost Intelligence (insight page)</div>
+    <div class="wireframe-body">
+      <div class="wireframe-row two">
+        <div class="wf-block"><div class="wf-block-title">OT Hotspots by Dept</div><span>ICU ₹1,40,000 (+38% vs avg)</span><span>Emergency ₹92,000 (+12%)</span><span style="color:var(--yellow);font-size:10px;">ICU suggests understaffing</span></div>
+        <div class="wf-block"><div class="wf-block-title">ESI Boundary Employees</div><span>4 employees ₹18k–₹21k gross</span><span>OT this month may change</span><span>their deduction profile</span></div>
+      </div>
+      <div class="wf-block" style="margin-top:8px;">
+        <div class="wf-block-title" style="margin-bottom:6px;">Top Cost-Saving Observations</div>
+        <div style="font-size:11px;line-height:1.9;color:var(--fg);">
+          1. 2 terminated employees paid ₹77,600 total — recover immediately<br>
+          2. ICU OT ₹1.4L suggests 1 additional nurse hire saves ~₹80k/month<br>
+          3. 3 employees on payroll with no attendance record this month<br>
+          4. PF contribution discrepancy on 2 employees — ₹3,200 under-deducted<br>
+          5. Branch Whitefield payroll 18% above Main Campus for same grades
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page 4 -->
+  <div class="wireframe-page">
+    <div class="wireframe-header">PAGE 4 — Audit Trail (compliance page)</div>
+    <div class="wireframe-body">
+      <div class="wf-block">
+        <div class="wf-block-title" style="margin-bottom:6px;">Reconciliation Run History</div>
+        <div style="font-family:var(--font-mono);font-size:11px;line-height:2;color:var(--fg);">
+          2024-10-31 · hris_export.csv · 7 flags · <span style="color:var(--green);">4 resolved</span> · 3 open<br>
+          2024-09-30 · hris_export.csv · 3 flags · <span style="color:var(--green);">3 resolved</span> · 0 open<br>
+          2024-08-31 · hris_export.csv · 5 flags · <span style="color:var(--green);">5 resolved</span> · 0 open
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <span class="error-action action-blue" style="cursor:pointer;">⬇ Export Full Audit Report (PDF)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB 4: FILE MAP -->
+<div class="section" id="tab-files">
+  <p class="section-title">Complete File Map</p>
+  <p class="section-subtitle">What exists, what's next, what's still pending.</p>
+
+  <div class="two-col">
+    <div class="card">
+      <p class="card-title">Source Files</p>
+      <div class="file-tree">
+        <div>hospital_pay_reconciliation/</div>
+        <div>├── src/</div>
+        <div class="file-done">│   ├── mock_generator.py ✓</div>
+        <div class="file-next">│   ├── validator.py ← next</div>
+        <div class="file-pending">│   ├── ingestion.py</div>
+        <div class="file-pending">│   ├── reconciliation.py</div>
+        <div class="file-pending">│   ├── insight_engine.py</div>
+        <div class="file-pending">│   └── report_generator.py</div>
+        <div class="file-pending">├── app.py</div>
+        <div class="file-done">├── requirements.txt ✓</div>
+        <div class="file-pending">├── Dockerfile</div>
+        <div class="file-pending">├── README.md</div>
+        <div class="file-pending">└── .github/workflows/ci.yml</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Data Folders</p>
+      <div class="file-tree">
+        <div>data/</div>
+        <div class="file-done">├── incoming_feeds/ ✓</div>
+        <div class="file-done">│   ├── hris_export.csv ✓</div>
+        <div class="file-done">│   ├── payroll_register.csv ✓</div>
+        <div class="file-done">│   └── gl_dump.csv ✓</div>
+        <div class="file-pending">├── archive/</div>
+        <div class="file-pending">├── quarantine/</div>
+        <div class="file-pending">└── warehouse.duckdb</div>
+        <div style="margin-top:12px;">logs/</div>
+        <div class="file-pending">├── pipeline_errors.log</div>
+        <div class="file-pending">└── ingestion_audit.log</div>
+        <div style="margin-top:12px;">tests/</div>
+        <div class="file-pending">├── test_validator.py</div>
+        <div class="file-pending">└── test_reconciliation.py</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Build Sequence — Do Not Skip Steps</p>
+    <div style="display:flex;flex-direction:column;gap:0;">
+      <!-- steps -->
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--green);color:white;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">✓</div>
+        <div><div style="font-weight:600;font-size:13px;">mock_generator.py</div><div style="font-size:12px;color:var(--fg-muted);">Three CSVs with 5 injected errors. Reproducible with --seed.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--accent);color:white;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">2</div>
+        <div><div style="font-weight:600;font-size:13px;">validator.py</div><div style="font-size:12px;color:var(--fg-muted);">Pydantic schema contracts. Bad files quarantined, never ingested. Pipeline never crashes.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--border);color:var(--fg);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">3</div>
+        <div><div style="font-weight:600;font-size:13px;">ingestion.py</div><div style="font-size:12px;color:var(--fg-muted);">MD5 hash check. Idempotent — drop same file twice, get no duplicate rows. Loads DuckDB tables.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--border);color:var(--fg);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">4</div>
+        <div><div style="font-weight:600;font-size:13px;">reconciliation.py</div><div style="font-size:12px;color:var(--fg-muted);">FULL OUTER JOIN across all three tables. Every row gets one of the 7 error bucket labels. Show to AGM before building UI.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--border);color:var(--fg);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">5</div>
+        <div><div style="font-weight:600;font-size:13px;">insight_engine.py</div><div style="font-size:12px;color:var(--fg-muted);">Z-score anomaly detection on OT/allowances. Cost pattern analysis. Recommended action per error type.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="background:var(--border);color:var(--fg);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">6</div>
+        <div><div style="font-weight:600;font-size:13px;">app.py (Streamlit)</div><div style="font-size:12px;color:var(--fg-muted);">4 pages: Overview · Mismatch Drilldown · Cost Intelligence · Audit Trail. Mark-resolved workflow. Export buttons.</div></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;">
+        <div style="background:var(--border);color:var(--fg);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">7</div>
+        <div><div style="font-weight:600;font-size:13px;">tests + README + GitHub</div><div style="font-size:12px;color:var(--fg-muted);">pytest for validator and reconciliation. README with architecture diagram. Then stop — ship it.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function show(tab, btn) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    btn.classList.add('active');
+  }
+</script>
+
+</body></html>
