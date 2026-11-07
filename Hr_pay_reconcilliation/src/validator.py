@@ -3,7 +3,7 @@ import pandas as pd
 from config import settings
 import shutil
 import logging
-logger = logging.getLogger("pipeline")
+
 
 files=[settings.name_gl,settings.name_hris,settings.name_payroll]
 quarentine_path=Path(settings.quarentine_path)
@@ -12,9 +12,10 @@ expected_cols=settings.EXPECTED_COLUMNS
 
 logging.basicConfig(
     filename="logs/pipeline_errors.log",
-    level=logging.debug,
+    level=logging.DEBUG,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
+logger = logging.getLogger("pipeline")
 
 
 
@@ -89,7 +90,7 @@ class Validation():
             return pd.read_csv(file_path)
         except Exception as e:
             logger.error(f"error:{e}")
-            return (f"error:{e}")
+            return None
         
         
 
@@ -103,7 +104,7 @@ class Validation():
         
         ok,msg,file_name,file_type=Validation.validate_file(file_path)
         if not ok:
-          logger.debug(f"file is valid: False,{"reason": msg}")
+          logger.debug(f"file is valid: False, reason: {msg}")
           return False, {"reason": msg}, None
         if feedtype not in expected_cols:
             bool_return=False

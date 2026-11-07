@@ -24,3 +24,8 @@ EXPECTED_COLUMNS = {
     "hris_export": hris_cols,
     "gl_dump": gl_cols,
 }
+
+department=[]
+designation=[]
+category=[]
+Allowed_Employment_Status=[]
