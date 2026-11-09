@@ -55,13 +55,15 @@ def setup_tables(conn):
     # create dim_employees table if not exists
     # create fact_payroll table if not exists
     # create fact_gl table if not exists
-    conn.execute("CREATE TABLE IF NOT  EXISTS file_md5_hash(id INTEGER,filename VARCHAR,md5_hash VARCHAR,loaded_at DATE,status VARCHAR)")
+    conn.execute("CREATE TABLE IF NOT  EXISTS ingestion_audit(id INTEGER,filename VARCHAR,md5_hash VARCHAR,loaded_at DATE,status VARCHAR)")
 
     conn.execute("CREATE TABLE IF NOT  EXISTS dim_employees(Employee_ID  VarCHAR,Employee_Name  VARCHAR,Department  VARCHAR,Designation VARCHAR,Category  VARCHAR,Date_Of_Joining  DATE,Date_Of_Leaving  DATE,Employment_Status VARCHAR,Base_Salary_HRIS FLOAT,Bank_Name VARCHAR,Bank_Account VARCHAR,UAN_Number VARCHAR,PAN_Number VARCHAR,Location VARCHAR)")
     
     conn.execute("CREATE TABLE IF NOT  EXISTS fact_payroll(Employee_ID VARCHAR,Employee_Name VARCHAR,Department VARCHAR,Pay_Period DATE,Base_Salary_Payroll FLOAT,Basic_salary FLOAT,HRA FLOAT,DA FLOAT,Transport_Allowance FLOAT, Medical_Allowance FLOAT,Special_Allowance FLOAT,Overtime FLOAT,Gross_Pay FLOAT,PF_Deduction FLOAT,ESI_Deduction FLOAT,TDS_Deduction FLOAT,PT_Deduction FLOAT,Loan_deduction FLOAT,Total_Deductions FLOAT,Net_pay FLOAT,Payment_Mode VARCHAR,Payment_Status VARCHAR,Payroll_Run_ID VARCHAR)")
 
     conn.execute("CREATE TABLE IF NOT EXISTS fact_gl(GL_Entry_ID VARCHAR,Employee_ID VARCHAR,Department VARCHAR,Pay_Period date,GL_Account_Code VARCHAR, GL_Amount_Posted FLOAT,Payroll_Net_Pay_Reference FLOAT,Posting_Date DATE,Posted_By VARCHAR,GL_Remarks VARCHAR)")
+
+    
 
     result= conn.execute(" SELECT * FROM filehash").fetchall()
 
@@ -78,24 +80,26 @@ def is_duplicate(conn, filehash: str) -> bool:
 
 def record_ingestion(conn, filename: str, md5_hash: str, status: str):
     # insert a row into ingestion_audit
-    ##will use logger to log into the ingestion audit filefor now
-    pass
+    audit_row={"file_name":filename,"md5_hash":md5_hash,"Status":status}
+    conn.execute("INSERT INTO ingestion_audit SELECT * FROM ?"[audit_row])
+    return conn,audit_row
 
-def load_records(conn, feedtype: str, valid_rows: list, filename: str):
+def load_records(conn, feedtype: str, valid_rows: list):
     # based on feedtype, insert valid_rows into the right table
     # dim_employees for hris_export
     # fact_payroll for payroll_register
     # fact_gl for gl_dump
 
-    row_data={"file_name":filename,"valid_rows":valid_rows}
+    row_data={"file_name":feedtype,"valid_rows":valid_rows}
 
     if feedtype =="hris_export":
         #change comparison as required based on file name 
         try:
-            conn.execute("BEGIN TRANSACTION")
+
             conn.execute("INSERT INTO dim_employees SELECT * FROM ? "[valid_rows])
         except Exception as e:
             conn.execute("ROLLBACK")
+            return(conn,f"error:{e}")
 
     elif feedtype =="payroll_register":
         #change comparison as required based on file name 
@@ -104,6 +108,7 @@ def load_records(conn, feedtype: str, valid_rows: list, filename: str):
             conn.execute("INSERT INTO fact_payroll SELECT * FROM ? "[valid_rows])
         except Exception as e:
             conn.execute("ROLLBACK")
+            return(conn,f"error:{e}")
 
     elif feedtype =="gl_dump":
         #change comparison as required based on file name 
@@ -112,13 +117,35 @@ def load_records(conn, feedtype: str, valid_rows: list, filename: str):
             conn.execute("INSERT INTO fact_gl SELECT * FROM ?"[valid_rows])
         except Exception as e:
             conn.execute("ROLLBACK")
+            return(conn,f"error:{e}")
     return conn,row_data
 
-def run_ingestion(file_path: Path, valid_rows: list, feedtype: str):
+def run_ingestion(file_path: Path, valid_rows: list,feedtype:str):
     # 1. compute md5
     # 2. connect to DB
     # 3. setup tables
     # 4. check if duplicate — if yes, log and return
     # 5. load records
     # 6. record in ingestion_audit with status "loaded"
-    pass
+    conn=get_connection(settings.database_path)
+    conn,result=setup_tables(conn)
+    md5_hash=file_md5(file_path)
+    file_duplicate=is_duplicate(conn,md5_hash)
+    if file_duplicate:
+            audit_logger.error("file already uploaded/run by the pipeline")
+            return("file already uploaded/run by the pipeline")
+    else:
+        try:
+            conn.execute("BEGIN TRANSACTION")
+            conn,audit_row=record_ingestion(conn,feedtype,md5_hash,status="loaded")
+            conn,row_data=load_records(conn,feedtype,valid_rows)
+            return (audit_row,row_data)
+
+        except Exception as e:
+            conn.execute("ROLLBACK")
+            logger.error("database writting failed in ingestion")
+            return("database writting failed in ingestion")
+        
+    
+
+    
