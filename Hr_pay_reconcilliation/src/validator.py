@@ -197,9 +197,9 @@ def run_main():
             valid = len(result["valid_rows"])
             invalid = len(result["invalid_rows"])
             print(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
-            return df
-    
     logger.info("Validation complete")
-
+    return df
+    
+    
 if __name__=="__main__":
     validation=Validation()

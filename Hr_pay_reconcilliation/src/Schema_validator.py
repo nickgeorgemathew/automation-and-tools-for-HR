@@ -228,12 +228,12 @@ class PayrollRegister(BaseModel):
     Special_Allowance:float
     Overtime:float
     Gross_Pay:float
-    PF_Deduction:float
-    ESI_Deduction:float
-    TDS_Deduction:float
-    PT_Deduction:float
+    PF_deduction:float
+    ESI_deduction:float
+    TDS_deduction:float
+    PT_deduction:float
     Loan_deduction:float
-    Total_Deductions:float
+    Total_deductions:float
     Net_pay:float
     Payment_Mode:str
     Payment_Status:str
@@ -343,7 +343,7 @@ class PayrollRegister(BaseModel):
             raise ValueError("Gross Pay is less than 0")
         return v
 
-    @field_validator('PF_Deduction')
+    @field_validator('PF_deduction')
     @classmethod
     def pf_deduction(cls,v):
         if v <0:
@@ -351,7 +351,7 @@ class PayrollRegister(BaseModel):
             raise ValueError("PF Deduction is less than 0")
         return v
 
-    @field_validator('ESI_Deduction')
+    @field_validator('ESI_deduction')
     @classmethod
     def esi_deduction(cls,v):
         if v <0:
@@ -359,7 +359,7 @@ class PayrollRegister(BaseModel):
             raise ValueError("ESI Deduction is less than 0")
         return v
 
-    @field_validator('TDS_Deduction')
+    @field_validator('TDS_deduction')
     @classmethod
     def tds_deduction(cls,v):
         if v <0:
@@ -367,7 +367,7 @@ class PayrollRegister(BaseModel):
             raise ValueError("TDS Deduction is less than 0")
         return v
 
-    @field_validator('PT_Deduction')
+    @field_validator('PT_deduction')
     @classmethod
     def pt_deduction(cls,v):
         if v <0:
@@ -383,7 +383,7 @@ class PayrollRegister(BaseModel):
             raise ValueError("Loan Deduction is less than 0")
         return v
 
-    @field_validator('Total_Deductions')
+    @field_validator('Total_deductions')
     @classmethod
     def total_deductions(cls,v):
         if v <0:
