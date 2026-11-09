@@ -3,11 +3,20 @@ import pandas as pd
 from config import settings
 import shutil
 import logging
+from Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
+
 
 
 files=[settings.name_gl,settings.name_hris,settings.name_payroll]
 quarentine_path=Path(settings.quarentine_path)
 expected_cols=settings.EXPECTED_COLUMNS
+
+
+schema_map={
+     "hris_export": HRISRecord,
+    "payroll_register": PayrollRegister,
+    "gl_dump": FinanceLedger,
+}
 
 
 logging.basicConfig(
@@ -93,6 +102,27 @@ class Validation():
             return None
         
         
+    @staticmethod
+    def validate_rows(feedtype,df):
+        schema=schema_map.get(feedtype)
+        if schema is None:
+            return [], [{"error": f"No schema for feedtype: {feedtype}"}]
+
+        valid_rows=[]
+        invalid_rows=[]
+
+        for index,row in df.iterrows():
+            try:
+                record=schema(**row.to_dict())
+                valid_rows.append(record.model_dump())
+            except Exception as e:
+                invalid_rows.append({
+                    "row_index": index,
+                    "error": str(e)
+                })
+                logger.warning(f"Row {index} failed validation: {e}")
+
+        return valid_rows, invalid_rows
 
 
     @staticmethod
@@ -142,15 +172,34 @@ class Validation():
         msg_dict=f"{feedtype} columns are valid"
         data_frame=df
         logger.info(f"Feedtype is valid:{bool_return}, message:{msg_dict},DataFrame:{data_frame}")
-        return (bool_return,msg_dict,data_frame)
+        valid_rows, invalid_rows = Validation.validate_rows(feedtype, df)
+        logger.info(f"{feedtype}: {len(valid_rows)} valid rows, {len(invalid_rows)} invalid rows")
+        return bool_return, {
+            "message":msg_dict,
+            "valid_rows": valid_rows,
+            "invalid_rows": invalid_rows
+            }, data_frame
+            
     
 def run_main():
     logger.info("Validation begin")
-    validation=Validation()
-    validation.detect_metadata()
-    validation.validate_file()
-    validation.read_csv()
-    validation.validate_cols()  
+    incoming_dir = Path(settings.incoming_feeds)  
     
+    for file_path in incoming_dir.glob("*.csv"):
+        metadata=validation.detect_metadata(file_path)
+        print(f"file:{file_path} \n metadata:{metadata}")
+        logger.info(f"Processing: {file_path.name}")
+        ok, result, df = Validation.validate_cols(file_path)
+        
+        if not ok:
+            print(f"{file_path.name} — FAILED: {result}")
+        else:
+            valid = len(result["valid_rows"])
+            invalid = len(result["invalid_rows"])
+            print(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
+            return df
+    
+    logger.info("Validation complete")
+
 if __name__=="__main__":
     validation=Validation()

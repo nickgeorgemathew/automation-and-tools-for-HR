@@ -1,4 +1,5 @@
 import os
+incoming_feeds="src/data/incoming_feeds"
 name_payroll="payroll_register"
 name_hris="hris_export"
 name_gl="gl_dump"
@@ -29,3 +30,4 @@ department=[]
 designation=[]
 category=[]
 Allowed_Employment_Status=[]
+location=[]
