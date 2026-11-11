@@ -184,26 +184,33 @@ class Validation():
 def run_main():
     logger.info("Validation begin")
     incoming_dir = Path(settings.incoming_feeds)  
+    result_obj={}
     
     for file_path in incoming_dir.glob("*.csv"):
-        metadata=validation.detect_metadata(file_path)
-        print(f"file:{file_path} \n metadata:{metadata}")
-        logger.info(f"Processing: {file_path.name}")
-        ok, result, df = Validation.validate_cols(file_path)
-        
-        if not ok:
-            print(f"{file_path.name} — FAILED: {result}")
-            logger.error(f"{file_path.name} — FAILED: {result}")
-        else:
-            valid = len(result["valid_rows"])
-            invalid = len(result["invalid_rows"])
-            print(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
-            logger.info(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
-            feedtype=file_path.stem
-            ingest=run_ingestion(file_path,result["valid_rows"],feedtype)
+        try:
+            metadata=validation.detect_metadata(file_path)
+            print(f"file:{file_path} \n metadata:{metadata}")
+            logger.info(f"Processing: {file_path.name}")
+            ok, result, df = Validation.validate_cols(file_path)
+            
+            if not ok:
+                print(f"{file_path.name} — FAILED: {result}")
+                logger.error(f"{file_path.name} — FAILED: {result}")
+            else:
+                valid = len(result["valid_rows"])
+                invalid = len(result["invalid_rows"])
+                print(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
+                logger.info(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
+                feedtype=file_path.stem
+                ingest=run_ingestion(file_path,result["valid_rows"],feedtype)
+                result_obj[file_path.name]={"df":df,"ingest":ingest}
+        except Exception as e:
+            logger.error(f"{e}")
+            result_obj[file_path.name]=f"{e}"
+            continue
     logger.info("Validation complete")
-    logger.info(f"{df},{ingest['audit_row']},{ingest['row_data']}")
-    return df,ingest["audit_row"],ingest["row_data"]
+    logger.info(f"{result_obj}")
+    return result_obj
     
     
 if __name__=="__main__":
