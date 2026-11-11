@@ -99,7 +99,8 @@ def load_records(conn, feedtype: str, valid_rows: list):
         try:
             conn.execute("INSERT INTO dim_employees SELECT * FROM  valid_rows")
         except Exception as e:
-            return(conn,f"error:{e}")
+            row_data=f"error:{e}"
+            return(conn,row_data)
 
     elif feedtype =="payroll_register":
         #change comparison as required based on file name 
@@ -107,14 +108,16 @@ def load_records(conn, feedtype: str, valid_rows: list):
             conn.execute("INSERT INTO fact_payroll SELECT * FROM valid_rows")
 
         except Exception as e:
-            return(conn,f"error:{e}")
+            row_data=f"error:{e}"
+            return(conn,row_data)
 
     elif feedtype =="gl_dump":
         #change comparison as required based on file name 
         try:
             conn.execute("INSERT INTO fact_gl SELECT * FROM valid_rows")
         except Exception as e:
-            return(conn,f"error:{e}")
+            row_data=f"error:{e}"
+            return(conn,row_data)
     return conn,row_data
 
 def run_ingestion(file_path: Path, valid_rows: list,feedtype:str):
@@ -128,22 +131,35 @@ def run_ingestion(file_path: Path, valid_rows: list,feedtype:str):
     setup_tables(conn)
     md5_hash=file_md5(file_path)
     file_duplicate=is_duplicate(conn,md5_hash)
+    ingest={"audit_row":None,"row_data":None}
     if file_duplicate:
-            audit_logger.error("file already uploaded/run by the pipeline")
-            return("file already uploaded/run by the pipeline")
+            msg="file already uploaded/run by the pipeline"
+            audit_logger.error(f"{msg}")
+            print(f"{msg}")
+            ingest["audit_row"]=msg
+            ingest["row_data"]=msg
+            return ingest
+
+
     else:
         try:
             conn.execute("BEGIN TRANSACTION")
             conn,audit_row=record_ingestion(conn,feedtype,md5_hash,status="loaded")
             conn,row_data=load_records(conn,feedtype,valid_rows)
             conn.execute("COMMIT")
-            return (audit_row,row_data)
+            ingest["audit_row"]=audit_row
+            ingest["row_data"]=row_data
+            return (ingest)
         
 
         except Exception as e:
             conn.execute("ROLLBACK")
-            logger.error("database writting failed in ingestion")
-            return("database writting failed in ingestion")
+            msg="database writting failed in ingestion"
+            logger.error(f"{msg}")
+            print(f"{msg}")
+            ingest["audit_row"]=msg
+            ingest["row_data"]=msg
+            return ingest
         
     
 

@@ -4,7 +4,7 @@ from config import settings
 import shutil
 import logging
 from Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
-
+from ingestion import run_ingestion
 
 
 files=[settings.name_gl,settings.name_hris,settings.name_payroll]
@@ -193,12 +193,17 @@ def run_main():
         
         if not ok:
             print(f"{file_path.name} — FAILED: {result}")
+            logger.error(f"{file_path.name} — FAILED: {result}")
         else:
             valid = len(result["valid_rows"])
             invalid = len(result["invalid_rows"])
             print(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
+            logger.info(f"{file_path.name} — {valid} valid rows, {invalid} invalid rows")
+            feedtype=file_path.stem
+            ingest=run_ingestion(file_path,result["valid_rows"],feedtype)
     logger.info("Validation complete")
-    return df
+    logger.info(f"{df},{ingest['audit_row']},{ingest['row_data']}")
+    return df,ingest["audit_row"],ingest["row_data"]
     
     
 if __name__=="__main__":
