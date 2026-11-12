@@ -3,6 +3,7 @@ from config import settings
 import pandas as pd
 from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime
 
 
 db_path=settings.database_path
@@ -37,7 +38,7 @@ class Finding:
     message: str
 
 
-pay_period="10/2026"
+pay_period=datetime(2024,10,1)
 
 hris_file="C:/Users/nikhi/Downloads/automation-and-tools-for-HR/Hr_pay_reconcilliation/src/data/incoming_feeds/hris_export.csv"
 hris_file=pd.read_csv(hris_file)
@@ -62,12 +63,11 @@ result=conn.execute("INSERT INTO fact_gl SELECT * FROM gl_file").fetchall()
 
 
 rows = conn.execute("""
-            SELECT e.Employee_ID,e.Date_of_Leaving,e.Employment_Status,p.Pay_Period,p.Payment_Status,p.Net_pay  FROM dim_employees AS e JOIN fact_payroll AS p ON e.Employee_ID = p.Employee_ID  WHERE p.Pay_period =? AND  p.Pay_Period > e.Date_of_Leaving AND e.Date_of_Leaving IS NOT Null
-        """, [pay_period]).fetchall()
-findings=[Finding(ErrorType.CRITICAL_TERMINATED_PAID, "CRITICAL", emp, pay_period,
-                        None, net, f"{emp} has exited but has been paid")for emp, net in rows]
-
-print(findings)
+            SELECT * FROM fact_payroll WHERE Pay_Period = ?""",[pay_period]).fetchall()
+# findings=[Finding(ErrorType.CRITICAL_TERMINATED_PAID, "CRITICAL", emp, pay_period,
+#                         None, net, f"{emp} has exited but has been paid")for emp, net in rows]
 
 
+# print(findings)
 print(result)
+print(rows)

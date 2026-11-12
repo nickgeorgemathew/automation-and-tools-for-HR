@@ -3,7 +3,7 @@ E0001,Ravi Reddy,OPD,Head_Nurse,Nursing,2019-08-02,,Active,45500.22,HDFC,XXXX267
 E0002,Ravi Das,HR,Senior_Consultant,Clinical,2022-07-03,,Active,164054.29,SBI,XXXX4257,UAN336696312,XXXXX8359X,Branch_Whitefield
 E0003,Shilpa Singh,Accounts,Physiotherapist,Allied_Health,2025-05-07,,Active,41760.32,HDFC,XXXX7924,UAN266944844,XXXXX4527X,Branch_Koramangala
 E0004,Rahul Krishnan,IT,Head_Nurse,Nursing,2020-11-11,,Active,46854.92,ICICI,XXXX5333,UAN675770529,XXXXX3045X,Branch_Koramangala
-E0005,Rahul Patel,HR,Visiting_Consultant,Clinical,2020-02-15,2024-09-02,Terminated,0.0,HDFC,XXXX2139,UAN930075810,XXXXX5741X,Main_Campus
+E0005,Rahul Patel,HR,Visiting_Consultant,Clinical,2020-02-15,2024-09-02,Terminated,0,HDFC,XXXX2139,UAN930075810,XXXXX5741X,Main_Campus
 E0006,Deepak Joshi,Pharmacy,Lab_Technician,Allied_Health,2019-12-15,,Active,35863.74,Canara,XXXX6977,UAN481469012,XXXXX4432X,Branch_Whitefield
 E0007,Ravi Patel,ICU,Physiotherapist,Allied_Health,2024-02-08,,On_Leave,39930.95,Union_Bank,XXXX3803,UAN275452091,XXXXX8573X,Branch_Koramangala
 E0008,Sunita Patel,Admin,Physiotherapist,Allied_Health,2024-07-21,,On_Leave,44821.9,HDFC,XXXX6313,UAN982403818,XXXXX1525X,Branch_Koramangala
@@ -43,7 +43,7 @@ E0041,Shilpa Murthy,Radiology,Security_Guard,Support,2024-07-16,2025-08-01,Termi
 E0042,Asha Pillai,Radiology,Pharmacist,Allied_Health,2021-06-01,,On_Leave,32606.84,Axis,XXXX5844,UAN305986733,XXXXX7888X,Branch_Whitefield
 E0043,Asha Kumar,HR,Accounts_Officer,Admin,2023-09-28,,Active,48546.36,ICICI,XXXX7653,UAN426283245,XXXXX5700X,Main_Campus
 E0044,Rekha Hegde,Pharmacy,IT_Support,Admin,2024-03-06,2025-07-28,Terminated,36786.38,Axis,XXXX8244,UAN608079792,XXXXX3780X,Branch_Whitefield
-E0045,Meena Patel,Housekeeping,Visiting_Consultant,Clinical,2022-08-14,,Active,0.0,Canara,XXXX6491,UAN822408848,XXXXX6085X,Main_Campus
+E0045,Meena Patel,Housekeeping,Visiting_Consultant,Clinical,2022-08-14,,Active,0,Canara,XXXX6491,UAN822408848,XXXXX6085X,Main_Campus
 E0046,Bharathi Das,Pharmacy,Radiographer,Allied_Health,2019-08-01,,Active,32947.08,Union_Bank,XXXX2193,UAN776205431,XXXXX4185X,Branch_Whitefield
 E0047,Rajesh Das,Housekeeping,Accounts_Officer,Admin,2018-06-29,,Active,44887.54,Canara,XXXX1090,UAN334978881,XXXXX3881X,Branch_Whitefield
 E0048,Manjula Shetty,Pharmacy,Security_Guard,Support,2019-08-19,2021-06-26,Terminated,17322.75,HDFC,XXXX8612,UAN739362057,XXXXX6198X,Branch_Koramangala

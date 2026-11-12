@@ -11,8 +11,6 @@ from Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
 
 reconciliation_logger = logging.getLogger("reconciliation")
 reconciliation_logger.setLevel(logging.INFO)
-p_handler = logging.FileHandler("logs/pipeline_errors.log")
-p_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
 a_handler = logging.FileHandler("logs/reconciliation.log")
 a_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 reconciliation_logger.addHandler(a_handler)
@@ -74,18 +72,19 @@ def build_reconciliation_view(conn, pay_period):
     # Pass the parameter three times—once for each placeholder in the unified query
     query = """
     SELECT * 
-    FROM (SELECT * FROM dim_employees WHERE Date_Of_Joining > ? AND (Date_Of_Leaving = NULL OR)) AS e 
+    FROM (SELECT * FROM dim_employees WHERE Date_Of_Joining <= ? AND (Date_Of_Leaving IS NULL OR Date_of_Leaving > ?)) AS e 
     FULL OUTER JOIN (SELECT * FROM fact_payroll WHERE Pay_Period = ?) AS p 
         USING (Employee_ID)
-    JOIN (SELECT * FROM fact_gl WHERE Pay_Period = ?) AS g 
+    LEFT JOIN (SELECT * FROM fact_gl WHERE Pay_Period = ?) AS g 
         USING (Employee_ID)
 """
     # Execute all at once, passing the parameter for each '?' positional placeholder
     try:
-        result = conn.execute(query, [pay_period, pay_period, pay_period]).fetchall()
+        result = conn.execute(query, [pay_period, pay_period, pay_period,pay_period]).fetchall()
         return conn,result
     except Exception as e:
-        print(f"error:{e}")  
+        print(f"error:{e}") 
+        reconciliation_logger.error(f"{e}") 
 
 # --- 5. RULES (one function each, same signature) ---
 # Each: takes conn (and/or the aligned data) -> returns list of findings
@@ -93,7 +92,7 @@ def build_reconciliation_view(conn, pay_period):
 
 def check_terminated_paid(conn,pay_period):   # E.status vs P existing after leaving date
     rows = conn.execute("""
-            SELECT e.Employee_ID,e.Date_of_Leaving,e.Employment_Status,p.Pay_Period,p.Payment_Status,p.Net_pay  FROM dim_employees AS e JOIN fact_payroll AS p ON e.Employee_ID = p.Employee_ID  WHERE p.Pay_period =? AND  p.Pay_Period > e.Date_of_Leaving AND e.Date_of_Leaving IS NOT Null
+            SELECT e.Employee_ID,p.Net_Pay  FROM dim_employees AS e JOIN fact_payroll AS p ON e.Employee_ID = p.Employee_ID  WHERE p.Pay_period =? AND  p.Pay_Period > e.Date_of_Leaving AND e.Date_of_Leaving IS NOT Null
         """, [pay_period]).fetchall()
     findings=[Finding(ErrorType.CRITICAL_TERMINATED_PAID, "CRITICAL", emp, pay_period,
                         None, net, f"{emp} has exited but has been paid")for emp, net in rows]
@@ -117,8 +116,25 @@ def check_orphan_payroll(conn,pay_period):    # P exists, E missing
         ]
     
 
-def check_duplicate_payment(conn,result): # same employee + period appears more than once. Why grouping?
-    pass
+def check_duplicate_payment(conn,pay_period): # same employee + period appears more than once. Why grouping?
+    rows = conn.execute("""
+            SELECT e.Employee_ID,Count(*)
+            FROM fact_payroll p
+            JOIN dim_employees e
+            ON e.Employee_ID =p.Employee_ID
+            WHERE Pay_Period =?
+            GROUP BY e.Employee_ID
+            Having Count(*)>1
+
+        """, [pay_period]).fetchall()
+    
+    return [
+            Finding(ErrorType.DUPLICATE_PAYMENT, severity="HIGH", employee_id=emp, pay_period=pay_period,expected=None,actual=None,message=
+                    f"Employee {emp} was paid {count} times in {pay_period} )"
+            )
+            for emp, count in rows
+        ]
+    
 
 def check_base_rate_mismatch(conn,pay_period):# E.Base_Salary_HRIS vs P.Base_Salary_Payroll
     rows = conn.execute("""
@@ -136,26 +152,96 @@ def check_base_rate_mismatch(conn,pay_period):# E.Base_Salary_HRIS vs P.Base_Sal
         ]
     
 
-def check_mom_variance(conn,pay_period):      # needs previous period. How do you get it? (window fn or self-join)
-    rows = conn.execute("""
-            SELECT p.Employee_ID, e.Base_Salary_HRIS, p.Base_Salary_Payroll
-            FROM fact_payroll p
-            JOIN dim_employees e ON e.Employee_ID = p.Employee_ID
-            WHERE p.Pay_Period = ?
-            AND ABS(e.Base_Salary_HRIS - p.Base_Salary_Payroll) > ?
-            
-        """, [pay_period, settings.tolerance]).fetchall()
-    
-    return [
-            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
-                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
-            for emp, hris, payroll in rows
-        ]
-    
+def check_mom_variance(
+    conn, pay_period: str, threshold_pct: float = 0.15
+) -> list[Finding]:
+  rows = conn.execute(
+      """
+        WITH monthly_totals AS (
+            -- Step 1: Aggregate pay per employee per period in case of multiple runs
+            SELECT 
+                Employee_ID,
+                Pay_Period,
+                SUM(Gross_Pay) AS current_pay
+            FROM fact_payroll
+            GROUP BY Employee_ID, Pay_Period
+        ),
+        mom_comparison AS (
+            -- Step 2: Look back 1 period per employee using LAG()
+            SELECT 
+                Employee_ID,
+                Pay_Period,
+                current_pay,
+                LAG(current_pay) OVER (
+                    PARTITION BY Employee_ID 
+                    ORDER BY Pay_Period
+                ) AS prev_pay
+            FROM monthly_totals
+        )
+        -- Step 3: Filter to the target pay_period and flag large swings
+        SELECT 
+            Employee_ID,
+            prev_pay,
+            current_pay,
+            ROUND(((current_pay - prev_pay) / prev_pay) * 100, 2) AS pct_change
+        FROM mom_comparison
+        WHERE Pay_Period = ?
+          AND prev_pay IS NOT NULL
+          AND prev_pay > 0
+          AND ABS(current_pay - prev_pay) / prev_pay > ?
+    """,
+      [pay_period, threshold_pct],
+  ).fetchall()
+
+  return [
+      Finding(
+          error_type=ErrorType.MOM_VARIANCE,
+          severity="MEDIUM",
+          employee_id=emp,
+          pay_period=pay_period,
+          expected=prev_pay,
+          actual=curr_pay,
+          message=(
+              f"MoM Gross Pay changed by {pct}% (Previous: {prev_pay}, Current:"
+              f" {curr_pay})"
+          ),
+      )
+      for emp, prev_pay, curr_pay, pct in rows
+  ]
     
 
-def check_headcount_mismatch(conn,result):# aggregate: compare counts across systems per period
-    pass
+def check_headcount_mismatch(conn,pay_period):# aggregate: compare counts across systems per period
+    hris_count = conn.execute(
+        """
+        SELECT COUNT(*) FROM
+        dim_employees WHERE DISTINCT Employee_ID AND Pay_Period = ?
+    """,
+        [pay_period],
+    ).fetchall()
+
+    payroll_count=conn.execute(
+        """
+        SELECT COUNT(*),DISTINCT Employee_ID FROM
+        Fact_payroll WHERE  Pay_Period = ?
+    """,
+        [pay_period],
+    ).fetchall()
+    
+    return [
+        Finding(
+            error_type=ErrorType.HEADCOUNT_MISMATCH,
+            severity="MEDIUM",
+            employee_id=emp,
+            pay_period=pay_period,
+            expected=count,
+            actual=found,
+            message=(f"""
+            emp_id {emp} found {count} times
+"""),
+        )for emp,count,found 
+        
+    ]
+    
 
 def check_off_cycle_adjustment(conn,result):  # define what "off-cycle" means in your data first
     pass
@@ -175,14 +261,13 @@ def check_ot_anomaly(conn,result):        # overtime vs a rule you define (absol
 
 
 # Rule 2: two systems disagree on a number
-def check_base_rate_mismatch(conn, pay_period):
-    pass
+
 
 # Rule 3: aggregate GL FIRST, then LEFT JOIN (avoids row multiplication)
 
 
 # Runner: same signature for every rule, so it's just a loop
-RULES = [check_orphan_payroll, check_base_rate_mismatch, check_gl_net_mismatch]
+RULES = [check_orphan_payroll, check_base_rate_mismatch, check_gl_net_mismatch,check_terminated_paid,check_duplicate_payment,check_mom_variance,check_headcount_mismatch,check_off_cycle_adjustment,check_esi_boundary,check_ot_anomaly]
 
 def run_reconciliation(conn, pay_period):
     # 1. build the aligned view
