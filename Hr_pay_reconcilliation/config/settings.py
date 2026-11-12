@@ -1,10 +1,11 @@
 import os
 incoming_feeds="src/data/incoming_feeds"
-database_path=""
+database_path="src/data/dim_employees.db"
 name_payroll="payroll_register"
 name_hris="hris_export"
 name_gl="gl_dump"
 quarentine_path="Hr_pay_reconcilliation/quarentine"
+tolerance=0.1
 # config/settings.py
 payroll_cols = [
     "Employee_ID","Employee_Name","Department","Pay_Period",
@@ -32,3 +33,7 @@ designation=[]
 category=[]
 Allowed_Employment_Status=[]
 location=[]
+MoM_variance_percentage=0
+OT_limit=0
+ESI_wage_boundary=0
+amount_tolerance=0
