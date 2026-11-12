@@ -238,6 +238,7 @@ class PayrollRegister(BaseModel):
     Payment_Mode:str
     Payment_Status:str
     Payroll_Run_ID:str
+    Remarks:str
 
     @field_validator('Employee_ID')
     @classmethod

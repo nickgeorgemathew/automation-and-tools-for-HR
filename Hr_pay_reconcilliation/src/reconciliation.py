@@ -91,9 +91,16 @@ def build_reconciliation_view(conn, pay_period):
 # Each: takes conn (and/or the aligned data) -> returns list of findings
 # Rules must not modify data and must not depend on each other.
 
-def check_terminated_paid(conn,result):   # E.status vs P existing after leaving date
-    pass
+def check_terminated_paid(conn,pay_period):   # E.status vs P existing after leaving date
+    rows = conn.execute("""
+            SELECT e.Employee_ID,e.Date_of_Leaving,e.Employment_Status,p.Pay_Period,p.Payment_Status,p.Net_pay  FROM dim_employees AS e JOIN fact_payroll AS p ON e.Employee_ID = p.Employee_ID  WHERE p.Pay_period =? AND  p.Pay_Period > e.Date_of_Leaving AND e.Date_of_Leaving IS NOT Null
+        """, [pay_period]).fetchall()
+    findings=[Finding(ErrorType.CRITICAL_TERMINATED_PAID, "CRITICAL", emp, pay_period,
+                        None, net, f"{emp} has exited but has been paid")for emp, net in rows]
+    reconciliation_logger.critical(f"{findings}")
     
+    return findings
+
 
 def check_orphan_payroll(conn,pay_period):    # P exists, E missing
     rows = conn.execute("""
@@ -129,8 +136,23 @@ def check_base_rate_mismatch(conn,pay_period):# E.Base_Salary_HRIS vs P.Base_Sal
         ]
     
 
-def check_mom_variance(conn,result):      # needs previous period. How do you get it? (window fn or self-join)
-    pass
+def check_mom_variance(conn,pay_period):      # needs previous period. How do you get it? (window fn or self-join)
+    rows = conn.execute("""
+            SELECT p.Employee_ID, e.Base_Salary_HRIS, p.Base_Salary_Payroll
+            FROM fact_payroll p
+            JOIN dim_employees e ON e.Employee_ID = p.Employee_ID
+            WHERE p.Pay_Period = ?
+            AND ABS(e.Base_Salary_HRIS - p.Base_Salary_Payroll) > ?
+            
+        """, [pay_period, settings.tolerance]).fetchall()
+    
+    return [
+            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
+                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
+            for emp, hris, payroll in rows
+        ]
+    
+    
 
 def check_headcount_mismatch(conn,result):# aggregate: compare counts across systems per period
     pass
@@ -157,28 +179,6 @@ def check_base_rate_mismatch(conn, pay_period):
     pass
 
 # Rule 3: aggregate GL FIRST, then LEFT JOIN (avoids row multiplication)
-def check_gl_net_mismatch(conn, pay_period):
-    rows = conn.execute("""
-        WITH gl AS (
-            SELECT Employee_ID, SUM(GL_Amount_Posted) AS posted
-            FROM fact_gl
-            WHERE Pay_Period = ?
-            GROUP BY Employee_ID
-        )
-        SELECT p.Employee_ID, p.Net_pay, gl.posted
-        FROM fact_payroll p
-        LEFT JOIN gl ON gl.Employee_ID = p.Employee_ID
-        WHERE p.Pay_Period = ?
-          AND (gl.posted IS NULL OR ABS(p.Net_pay - gl.posted) > ?)
-    """, [pay_period, pay_period, settings.tolerance]).fetchall()
-
-    return [
-        Finding(ErrorType.GL_NET_MISMATCH, "HIGH", emp, pay_period,
-                net, posted,
-                "Not posted to GL" if posted is None
-                else f"Payroll net {net}, GL posted {posted}")
-        for emp, net, posted in rows
-    ]
 
 
 # Runner: same signature for every rule, so it's just a loop
