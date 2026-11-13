@@ -211,20 +211,14 @@ def check_mom_variance(
     
 
 def check_headcount_mismatch(conn,pay_period):# aggregate: compare counts across systems per period
-    hris_count = conn.execute(
+    rows = conn.execute(
         """
         SELECT COUNT(*) FROM
-        dim_employees WHERE DISTINCT Employee_ID AND Pay_Period = ?
+        dim_employees AS e 
+        JOIN Fact_payroll AS p ON p.Employee_ID = e.Employee_ID
+        WHERE DISTINCT Employee_ID AND Pay_Period = ?
     """,
-        [pay_period],
-    ).fetchall()
-
-    payroll_count=conn.execute(
-        """
-        SELECT COUNT(*),DISTINCT Employee_ID FROM
-        Fact_payroll WHERE  Pay_Period = ?
-    """,
-        [pay_period],
+        [pay_period]
     ).fetchall()
     
     return [
@@ -237,23 +231,56 @@ def check_headcount_mismatch(conn,pay_period):# aggregate: compare counts across
             actual=found,
             message=(f"""
             emp_id {emp} found {count} times
-"""),
-        )for emp,count,found 
+""")
+        )for emp,count,found in rows
         
     ]
     
 
-def check_off_cycle_adjustment(conn,result):  # define what "off-cycle" means in your data first
-    pass
+def check_off_cycle_adjustment(conn,pay_period):  # define what "off-cycle" means in your data first
+    rows = conn.execute("""
+        SELECT * FROM 
+        """, [pay_period, settings.tolerance]).fetchall()
+    
+    return [
+            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
+                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
+            for emp, hris, payroll in rows
+        ]
+    
 
-def check_gl_net_mismatch(conn,result):   # P.Net_pay vs G posted amount. Beware: multiple GL rows per employee?
-    pass
+def check_gl_net_mismatch(conn,pay_period):   # P.Net_pay vs G posted amount. Beware: multiple GL rows per employee?
+    rows = conn.execute("""
+        SELECT * FROM 
+        """, [pay_period, settings.tolerance]).fetchall()
+    
+    return [
+            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
+                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
+            for emp, hris, payroll in rows
+        ]
 
-def check_esi_boundary(conn,result):      # gross near the ESI limit: risk, not certain error
-    pass
+def check_esi_boundary(conn,pay_period):      # gross near the ESI limit: risk, not certain error
+    rows = conn.execute("""
+        SELECT Gross_Pay,ESI_Deduction FROM dim_employee Where Gross_pay > ? AND 
+        """, [settings.esi_boundary,pay_period]).fetchall()
+    
+    return [
+            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
+                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
+            for emp, hris, payroll in rows
+        ]
 
-def check_ot_anomaly(conn,result):        # overtime vs a rule you define (absolute? relative to base?)
-    pass
+def check_ot_anomaly(conn,pay_period):        # overtime vs a rule you define (absolute? relative to base?)
+    rows = conn.execute("""
+        SELECT * FROM 
+        """, [pay_period, settings.tolerance]).fetchall()
+    
+    return [
+            Finding(ErrorType.BASE_RATE_MISMATCH, "MEDIUM", emp, pay_period,
+                    hris, payroll, f"HRIS says {hris}, payroll used {payroll}")
+            for emp, hris, payroll in rows
+        ]
 
 
 

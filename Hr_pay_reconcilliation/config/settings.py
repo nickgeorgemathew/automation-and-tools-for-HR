@@ -6,6 +6,7 @@ name_hris="hris_export"
 name_gl="gl_dump"
 quarentine_path="Hr_pay_reconcilliation/quarentine"
 tolerance=0.1
+esi_boundary=25000
 # config/settings.py
 payroll_cols = [
     "Employee_ID","Employee_Name","Department","Pay_Period",
