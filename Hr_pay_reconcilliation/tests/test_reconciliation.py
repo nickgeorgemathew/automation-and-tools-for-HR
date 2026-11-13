@@ -7,7 +7,7 @@ employee (E01) who must never be flagged. Run:  pytest -q
 import duckdb
 import pytest
 
-import reconciliation as rec
+from src import reconciliation as rec
 
 PERIOD = "2024-10-01"
 PREV = "2024-09-01"

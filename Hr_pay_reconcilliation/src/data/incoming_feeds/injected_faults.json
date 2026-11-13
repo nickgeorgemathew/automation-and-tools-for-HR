@@ -1,0 +1,81 @@
+{
+  "seed": 42,
+  "periods": [
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01"
+  ],
+  "fault_period": "2024-10-01",
+  "faults": {
+    "E1": [
+      "E0012"
+    ],
+    "E2": [
+      "E9901",
+      "E9902"
+    ],
+    "E3": [
+      "E0007",
+      "E0013",
+      "E0016"
+    ],
+    "E4": [
+      "E0017",
+      "E0003"
+    ],
+    "E5": [
+      "E0011",
+      "E0020"
+    ],
+    "E6": [
+      "E0005"
+    ],
+    "E7": [
+      "E0002"
+    ],
+    "E8": [
+      "E0019"
+    ],
+    "mid_month_leaver": "E0004"
+  },
+  "expected": {
+    "CRITICAL_TERMINATED_PAID": [
+      "E0012"
+    ],
+    "ORPHAN_PAYROLL_RECORD": [
+      "E9901",
+      "E9902"
+    ],
+    "BASE_RATE_MISMATCH": [
+      "E0007",
+      "E0013",
+      "E0016"
+    ],
+    "OFF_CYCLE_MANUAL_ADJ": [
+      "E0003",
+      "E0017"
+    ],
+    "GL_NET_MISMATCH": [
+      "E0011",
+      "E0020"
+    ],
+    "DUPLICATE_PAYMENT": [
+      "E0005"
+    ],
+    "MOM_VARIANCE": [
+      "E0002",
+      "E0005",
+      "E0019"
+    ],
+    "OT_ANOMALY": [
+      "E0019"
+    ],
+    "HEADCOUNT_MISMATCH": 1,
+    "_note": "ESI_BOUNDARY_RISK is natural (low-pay roles) and is not part of the exact check"
+  },
+  "rows": {
+    "hris": 20,
+    "payroll": 63,
+    "gl": 63
+  }
+}

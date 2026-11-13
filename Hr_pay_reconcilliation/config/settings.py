@@ -6,7 +6,7 @@ name_hris="hris_export"
 name_gl="gl_dump"
 quarentine_path="Hr_pay_reconcilliation/quarentine"
 tolerance=0.1
-esi_boundary=25000
+esi_boundary=25000 
 overtime_eligible=[]
 # config/settings.py
 payroll_cols = [
