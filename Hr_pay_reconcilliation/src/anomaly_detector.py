@@ -57,26 +57,10 @@ def ot_hotspots_by_dept(conn, pay_period: str) -> list[dict]:
     df["z_score"] = (df["total_ot"] - df["mean_ot"]) / df["std_ot"]
 
     df["z_over_threshold"]=df(df["z_score"]>settings.z_threshold)
-    
-    # Step 1: query fact_payroll for Overtime grouped by Department
-    # WHERE Pay_Period = pay_period, exclude Manual_Adjustment rows
-    # GROUP BY Department, SUM(Overtime)
-    
-    # Step 2: load into a pandas DataFrame
-    
-    # Step 3: compute mean and std across departments
-    #   df["mean_ot"] = df["total_ot"].mean()
-    #   df["std_ot"]  = df["total_ot"].std()
-    #   df["z_score"] = (df["total_ot"] - df["mean_ot"]) / df["std_ot"]
-    
-    # Step 4: filter rows where z_score > threshold
-    
-    # Step 5: add pct_above_avg = round((total_ot - mean_ot) / mean_ot * 100, 1)
-    
-    # Step 6: return as list of dicts (df.to_dict("records"))
-    
-    pass
+    df["pct_above_avg"] = round((df["total_ot"] - df["mean_ot"]) / df["mean_ot"] * 100, 1)
 
+    return (df.to_dict("records"))
+    
 
 # ------------------------------------------------------------------
 # 2. ESI BOUNDARY EMPLOYEES
