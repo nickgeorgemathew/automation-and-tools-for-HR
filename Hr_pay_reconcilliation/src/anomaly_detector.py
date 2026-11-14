@@ -142,7 +142,7 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
     observations = []
     for _,row in df.head(n).iterrows():
         action = ACTIONS.get(row["error_type"], "review manually")
-        line = f"{row['finding_count']} {row['error_type']} findings — ₹{row['amount_at_risk']:,.0f} total — {action}"
+        line = f"{row['finding_count']} {row['error_type']} findings - Rs.{row['amount_at_risk']:,.0f} total - {action}"
         observations.append(line)
     return observations
     
