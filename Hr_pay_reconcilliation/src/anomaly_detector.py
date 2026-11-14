@@ -44,7 +44,7 @@ def ot_hotspots_by_dept(conn, pay_period: str) -> list[dict]:
       { department, total_ot, mean_ot, z_score, pct_above_avg }
     """
     over_time=conn.execute("""
-        Select Department,SUM(Overtime) AS total_ot 
+        SELECT Department,SUM(Overtime) AS total_ot 
         FROM fact_payroll
         WHERE pay_period =? AND COALESCE(Payment_Mode, '') <> 'Manual_Adjustment'
         Group By Department 
@@ -55,9 +55,10 @@ def ot_hotspots_by_dept(conn, pay_period: str) -> list[dict]:
     df["mean_ot"] = df["total_ot"].mean()
     df["std_ot"]  = df["total_ot"].std()
     df["z_score"] = (df["total_ot"] - df["mean_ot"]) / df["std_ot"]
-
-    df["z_over_threshold"]=df(df["z_score"]>settings.z_threshold)
     df["pct_above_avg"] = round((df["total_ot"] - df["mean_ot"]) / df["mean_ot"] * 100, 1)
+    threshold = _cfg("ot_z_threshold", 1.5)
+    df = df[df["z_score"] > threshold]
+    
 
     return (df.to_dict("records"))
     
@@ -75,6 +76,17 @@ def esi_boundary_employees(conn, pay_period: str) -> list[dict]:
     """
     limit = float(_cfg("ESI_wage_boundary", 21000))
     band  = float(_cfg("ESI_band", 3000))
+    limit_band=limit-band
+    esi_boundary=conn.execute("""SELECT Employee_ID,Department,Gross_Pay 
+            FROM fact_payroll
+            WHERE pay_period =? AND Gross_Pay BETWEEN ? AND ?
+            AND COALESCE (Payment_Mode,'') <> 'Manual_Adjustment'
+            """,[pay_period,limit_band,limit]).fetchall()
+    df=pd.DataFrame(esi_boundary, columns=["Employee_ID","Department","Gross_Pay"])
+    df["gap"]= limit-df["Gross_Pay"]
+    df["esi_limit"] = limit
+
+    return (df.to_dict("records"))
 
     # Query fact_payroll:
     #   SELECT Employee_ID, Department, Gross_Pay
@@ -85,7 +97,7 @@ def esi_boundary_employees(conn, pay_period: str) -> list[dict]:
     
     # Return list of dicts
     
-    pass
+    
 
 
 # ------------------------------------------------------------------
@@ -99,6 +111,13 @@ def dept_cost_summary(conn, pay_period: str) -> list[dict]:
     Returns list of dicts:
       { department, headcount, total_gross, total_net, total_ot }
     """
+    dept=conn.execute("""SELECT Department,COUNT(DISTINCT Employee_ID) AS head_count,SUM(Gross_Pay) AS total_gross,SUM(Net_pay) AS total_net,SUM(Overtime) AS total_ot
+            FROM fact_payroll
+            WHERE pay_period=? AND COALESCE(Payment_Mode, '') <> 'Manual_Adjustment' 
+            GROUP BY Department            
+            """,[pay_period]).fetchall()
+    df=pd.DataFrame(dept,columns=["Department","headcount","total_gross","total_net","total_ot"])
+    return (df.to_dict("records"))
     # Query fact_payroll grouped by Department for this pay_period
     # SELECT Department,
     #        COUNT(DISTINCT Employee_ID) AS headcount,
@@ -107,7 +126,7 @@ def dept_cost_summary(conn, pay_period: str) -> list[dict]:
     #        SUM(Overtime) AS total_ot
     # GROUP BY Department
     
-    pass
+    
 
 
 # ------------------------------------------------------------------
@@ -120,7 +139,7 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
     Return top-n human-readable strings ranked by total amount.
 
     Example output:
-      "2 CRITICAL_TERMINATED_PAID findings — ₹77,600 total — recover immediately"
+      2 CRITICAL_TERMINATED_PAID findings — ₹77,600 total — recover immediately"
     """
     # Query fact_reconciliation WHERE pay_period = ?
     # For each error_type: count findings, sum(actual) where actual is not null
@@ -140,8 +159,21 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
         "ESI_BOUNDARY_RISK":          "monitor next cycle",
         "HEADCOUNT_MISMATCH":         "separate joiners from orphans",
     }
+    observe=conn.execute("""SELECT error_type,SUM(actual) AS amount_at_risk,COUNT(*) AS finding_count,message 
+                    FROM fact_reconciliation 
+                    WHERE pay_period = ? AND actual IS NOT NULL 
+                    GROUP BY  error_type 
+                    ORDER BY SUM(actual) DESC
+            """,[pay_period]).fetchall()
+    df=pd.DataFrame(observe,columns=["error_type","amount_at_risk","finding_count","message"])
+    observations = []
+    for _,row in df.head(15).iterrows():
+        action = ACTIONS.get(row["error_type"], "review manually")
+        line = f"{row['finding_count']} findings in {action} ₹{row['amount_at_risk']:,.0f} total"
+        observations.append(line)
+    return observations
     
-    pass
+    
 
 
 # ------------------------------------------------------------------
