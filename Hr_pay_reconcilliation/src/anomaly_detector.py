@@ -84,14 +84,6 @@ def esi_boundary_employees(conn, pay_period: str) -> list[dict]:
 
     return (df.to_dict("records"))
 
-    # Query fact_payroll:
-    #   SELECT Employee_ID, Department, Gross_Pay
-    #   WHERE Pay_Period = ? AND Gross_Pay BETWEEN (limit-band) AND limit
-    #   AND Payment_Mode != 'Manual_Adjustment'
-    
-    # For each row add:  gap = limit - gross_pay
-    
-    # Return list of dicts
     
     
 
@@ -113,13 +105,6 @@ def dept_cost_summary(conn, pay_period: str) -> list[dict]:
             GROUP BY Department            
             """,[pay_period]).fetchdf()
     return (df.to_dict("records"))
-    # Query fact_payroll grouped by Department for this pay_period
-    # SELECT Department,
-    #        COUNT(DISTINCT Employee_ID) AS headcount,
-    #        SUM(Gross_Pay) AS total_gross,
-    #        SUM(Net_pay) AS total_net,
-    #        SUM(Overtime) AS total_ot
-    # GROUP BY Department
     
     
 
@@ -136,12 +121,6 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
     Example output:
       2 CRITICAL_TERMINATED_PAID findings — ₹77,600 total — recover immediately"
     """
-    # Query fact_reconciliation WHERE pay_period = ?
-    # For each error_type: count findings, sum(actual) where actual is not null
-    # Sort by sum(actual) DESC, take top n
-    # Format each as a string
-    
-    # Recommended action map (use this):
     ACTIONS = {
         "CRITICAL_TERMINATED_PAID":  "recover immediately",
         "ORPHAN_PAYROLL_RECORD":      "escalate to fraud review",
@@ -161,9 +140,9 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
                     ORDER BY SUM(actual) DESC
             """,[pay_period]).fetchdf()
     observations = []
-    for _,row in df.head(15).iterrows():
+    for _,row in df.head(n).iterrows():
         action = ACTIONS.get(row["error_type"], "review manually")
-        line = f"{row['finding_count']} findings in {row['error_type']}- ₹{row['amount_at_risk']:,.0f} total - {action}"
+        line = f"{row['finding_count']} {row['error_type']} findings — ₹{row['amount_at_risk']:,.0f} total — {action}"
         observations.append(line)
     return observations
     
@@ -182,11 +161,6 @@ def risk_ranked_findings(conn, pay_period: str) -> list[dict]:
     """
     SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
-    # Query fact_reconciliation WHERE pay_period = ?
-    # Load into DataFrame
-    # Map severity to sort key using SEVERITY_ORDER
-    # Sort by (severity_rank ASC, actual DESC)
-    # Return as list of dicts
     df=conn.execute("""SELECT * 
                         FROM fact_reconciliation 
                         WHERE pay_period = ? AND actual IS NOT NULL 
