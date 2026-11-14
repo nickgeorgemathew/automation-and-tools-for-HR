@@ -43,15 +43,12 @@ def ot_hotspots_by_dept(conn, pay_period: str) -> list[dict]:
     Returns list of dicts:
       { department, total_ot, mean_ot, z_score, pct_above_avg }
     """
-    over_time=conn.execute("""
+    df=conn.execute("""
         SELECT Department,SUM(Overtime) AS total_ot 
         FROM fact_payroll
         WHERE pay_period =? AND COALESCE(Payment_Mode, '') <> 'Manual_Adjustment'
         Group By Department 
-""",[pay_period]).fetchall()
-
-    df = pd.DataFrame(over_time, columns=["department", "total_ot"])
-
+""",[pay_period]).fetchdf()
     df["mean_ot"] = df["total_ot"].mean()
     df["std_ot"]  = df["total_ot"].std()
     df["z_score"] = (df["total_ot"] - df["mean_ot"]) / df["std_ot"]
@@ -77,12 +74,11 @@ def esi_boundary_employees(conn, pay_period: str) -> list[dict]:
     limit = float(_cfg("ESI_wage_boundary", 21000))
     band  = float(_cfg("ESI_band", 3000))
     limit_band=limit-band
-    esi_boundary=conn.execute("""SELECT Employee_ID,Department,Gross_Pay 
+    df=conn.execute("""SELECT Employee_ID,Department,Gross_Pay 
             FROM fact_payroll
             WHERE pay_period =? AND Gross_Pay BETWEEN ? AND ?
             AND COALESCE (Payment_Mode,'') <> 'Manual_Adjustment'
-            """,[pay_period,limit_band,limit]).fetchall()
-    df=pd.DataFrame(esi_boundary, columns=["Employee_ID","Department","Gross_Pay"])
+            """,[pay_period,limit_band,limit]).fetchdf()
     df["gap"]= limit-df["Gross_Pay"]
     df["esi_limit"] = limit
 
@@ -111,12 +107,11 @@ def dept_cost_summary(conn, pay_period: str) -> list[dict]:
     Returns list of dicts:
       { department, headcount, total_gross, total_net, total_ot }
     """
-    dept=conn.execute("""SELECT Department,COUNT(DISTINCT Employee_ID) AS head_count,SUM(Gross_Pay) AS total_gross,SUM(Net_pay) AS total_net,SUM(Overtime) AS total_ot
+    df=conn.execute("""SELECT Department,COUNT(DISTINCT Employee_ID) AS head_count,SUM(Gross_Pay) AS total_gross,SUM(Net_pay) AS total_net,SUM(Overtime) AS total_ot
             FROM fact_payroll
             WHERE pay_period=? AND COALESCE(Payment_Mode, '') <> 'Manual_Adjustment' 
             GROUP BY Department            
-            """,[pay_period]).fetchall()
-    df=pd.DataFrame(dept,columns=["Department","headcount","total_gross","total_net","total_ot"])
+            """,[pay_period]).fetchdf()
     return (df.to_dict("records"))
     # Query fact_payroll grouped by Department for this pay_period
     # SELECT Department,
@@ -159,17 +154,16 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
         "ESI_BOUNDARY_RISK":          "monitor next cycle",
         "HEADCOUNT_MISMATCH":         "separate joiners from orphans",
     }
-    observe=conn.execute("""SELECT error_type,SUM(actual) AS amount_at_risk,COUNT(*) AS finding_count 
+    df=conn.execute("""SELECT error_type,SUM(actual) AS amount_at_risk,COUNT(*) AS finding_count 
                     FROM fact_reconciliation 
                     WHERE pay_period = ? AND actual IS NOT NULL 
                     GROUP BY  error_type 
                     ORDER BY SUM(actual) DESC
-            """,[pay_period]).fetchall()
-    df=pd.DataFrame(observe,columns=["error_type","amount_at_risk","finding_count"])
+            """,[pay_period]).fetchdf()
     observations = []
     for _,row in df.head(15).iterrows():
         action = ACTIONS.get(row["error_type"], "review manually")
-        line = f"{row['finding_count']} findings in {row['error_type']} ₹{row['amount_at_risk']:,.0f} total-{action}"
+        line = f"{row['finding_count']} findings in {row['error_type']}- ₹{row['amount_at_risk']:,.0f} total - {action}"
         observations.append(line)
     return observations
     
@@ -193,8 +187,19 @@ def risk_ranked_findings(conn, pay_period: str) -> list[dict]:
     # Map severity to sort key using SEVERITY_ORDER
     # Sort by (severity_rank ASC, actual DESC)
     # Return as list of dicts
+    df=conn.execute("""SELECT * 
+                        FROM fact_reconciliation 
+                        WHERE pay_period = ? AND actual IS NOT NULL 
+                        
+                """,[pay_period]).fetchdf()
+            
+    df["severity_rank"]=df["severity"].map(SEVERITY_ORDER).fillna(99)
+    df=df.sort_values(by=["severity_rank", "actual"], ascending=[True, False])
+    return(df.to_dict("records"))
     
-    pass
+
+
+    
 
 
 # ------------------------------------------------------------------
