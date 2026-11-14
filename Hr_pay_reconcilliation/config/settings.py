@@ -8,6 +8,7 @@ quarentine_path="Hr_pay_reconcilliation/quarentine"
 tolerance=0.1
 esi_boundary=25000 
 z_threshold=1
+output_path="Hr_pay_reconcilliation/report.pdf"
 overtime_eligible=[]
 # config/settings.py
 payroll_cols = [

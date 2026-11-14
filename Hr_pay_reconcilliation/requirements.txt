@@ -3,6 +3,7 @@ fastapi
 uvicorn
 werkzeug
 filetype
+weasyprint
 # Core Data Processing & Manipulation
 pandas>=2.0.0
 numpy>=1.24.0
