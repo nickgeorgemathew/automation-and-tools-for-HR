@@ -159,17 +159,17 @@ def top_observations(conn, pay_period: str, n: int = 5) -> list[str]:
         "ESI_BOUNDARY_RISK":          "monitor next cycle",
         "HEADCOUNT_MISMATCH":         "separate joiners from orphans",
     }
-    observe=conn.execute("""SELECT error_type,SUM(actual) AS amount_at_risk,COUNT(*) AS finding_count,message 
+    observe=conn.execute("""SELECT error_type,SUM(actual) AS amount_at_risk,COUNT(*) AS finding_count 
                     FROM fact_reconciliation 
                     WHERE pay_period = ? AND actual IS NOT NULL 
                     GROUP BY  error_type 
                     ORDER BY SUM(actual) DESC
             """,[pay_period]).fetchall()
-    df=pd.DataFrame(observe,columns=["error_type","amount_at_risk","finding_count","message"])
+    df=pd.DataFrame(observe,columns=["error_type","amount_at_risk","finding_count"])
     observations = []
     for _,row in df.head(15).iterrows():
         action = ACTIONS.get(row["error_type"], "review manually")
-        line = f"{row['finding_count']} findings in {action} ₹{row['amount_at_risk']:,.0f} total"
+        line = f"{row['finding_count']} findings in {row['error_type']} ₹{row['amount_at_risk']:,.0f} total-{action}"
         observations.append(line)
     return observations
     
