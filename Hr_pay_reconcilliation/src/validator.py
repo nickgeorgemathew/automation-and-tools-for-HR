@@ -5,12 +5,14 @@ import shutil
 import logging
 from src.Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
 from src.ingestion import run_ingestion
+from src.validator import Validation
 
 
 files=[settings.name_gl,settings.name_hris,settings.name_payroll]
 quarentine_path=Path(settings.quarentine_path)
 expected_cols=settings.EXPECTED_COLUMNS
-
+incoming_dir=settings.incoming_feeds
+  
 
 schema_map={
      "hris_export": HRISRecord,
@@ -18,6 +20,7 @@ schema_map={
     "gl_dump": FinanceLedger,
 }
 
+expected_cols = {name: list(model.model_fields) for name, model in schema_map.items()}
 
 logging.basicConfig(
     filename="logs/pipeline_errors.log",
@@ -75,7 +78,7 @@ class Validation():
                              
             if file_name not in files:
                 quarantine_path = Path(settings.quarentine_path)
-                quarantine_path.mkdir(exist_ok=True)
+                quarantine_path.mkdir(parents=True, exist_ok=True)
                 dest = quarantine_path / file_path.name
                 shutil.copy2(file_path, dest)        
                 file_path.unlink()
@@ -185,10 +188,12 @@ def run_main():
     logger.info("Validation begin")
     incoming_dir = Path(settings.incoming_feeds)  
     result_obj={}
+    # in run_main
+     
     
     for file_path in incoming_dir.glob("*.csv"):
         try:
-            metadata=validation.detect_metadata(file_path)
+            metadata = Validation.detect_metadata(file_path)
             print(f"file:{file_path} \n metadata:{metadata}")
             logger.info(f"Processing: {file_path.name}")
             ok, result, df = Validation.validate_cols(file_path)
