@@ -3,8 +3,8 @@ import pandas as pd
 from config import settings
 import shutil
 import logging
-from Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
-from ingestion import run_ingestion
+from src.Schema_validator import HRISRecord,PayrollRegister,FinanceLedger
+from src.ingestion import run_ingestion
 
 
 files=[settings.name_gl,settings.name_hris,settings.name_payroll]

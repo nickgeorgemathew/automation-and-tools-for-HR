@@ -1,43 +1,44 @@
-import os
-incoming_feeds="src/data/incoming_feeds"
-database_path="src/data/dim_employees.db"
-name_payroll="payroll_register"
-name_hris="hris_export"
-name_gl="gl_dump"
-quarentine_path="Hr_pay_reconcilliation/quarentine"
-tolerance=0.1
-esi_boundary=25000 
-z_threshold=1
-output_path="Hr_pay_reconcilliation/output"
-overtime_eligible=[]
 # config/settings.py
-payroll_cols = [
-    "Employee_ID","Employee_Name","Department","Pay_Period",
-    "Base_Salary_Payroll","Net_Pay","Payroll_Run_ID"
+from pathlib import Path
+
+# Project root. Assumes this file lives at <root>/config/settings.py.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# -- Paths (absolute, so they no longer depend on where Streamlit is launched) --
+incoming_feeds = str(BASE_DIR / "src" / "data" / "incoming_feeds")
+database_path = str(BASE_DIR / "src" / "data" / "dim_employees.db")
+quarentine_path = str(BASE_DIR / "src" / "data" / "quarentine")
+output_path = str(BASE_DIR / "output")
+
+# -- Feed file names: WITH the extension. validator.py compares them to file_path.name,
+#    run_main() globs "*.csv", and the Overview page saves uploads under these names. --
+name_payroll = "payroll_register.csv"
+name_hris = "hris_export.csv"
+name_gl = "gl_dump.csv"
+
+# -- Allowed values for row validation (copied from mock_generator.py).
+#    For real data, take these lists from HR, not from the generator. --
+department = [
+    "Emergency", "ICU", "General_Ward", "OPD", "Surgery",
+    "Radiology", "Pathology", "Pharmacy", "Admin", "HR",
+    "Housekeeping", "Security", "Accounts", "IT", "Canteen",
 ]
-
-hris_cols = [
-    "Employee_ID","Employee_Name","Department","Date_Of_Joining",
-    "Employment_Status","Base_Salary_HRIS"
+designation = [
+    "Senior_Consultant", "Junior_Resident_Doctor", "Head_Nurse", "Staff_Nurse", "ANM",
+    "Radiographer", "Lab_Technician", "Physiotherapist", "Pharmacist",
+    "HR_Manager", "HR_Executive", "Accounts_Officer", "IT_Support", "Admin_Executive",
+    "Housekeeping_Staff", "Security_Guard", "Canteen_Staff", "Driver",
 ]
+category = ["Clinical", "Nursing", "Allied_Health", "Admin", "Support"]
+Allowed_Employment_Status = ["Active", "Terminated", "On_Leave"]
+location = ["Main_Campus", "Branch_Koramangala", "Branch_Whitefield"]
 
-gl_cols = [
-    "GL_Entry_ID","Employee_ID","Department","Pay_Period",
-    "GL_Account_Code","GL_Amount_Posted","Payroll_Net_Pay_Reference"
-]
+# -- Thresholds. These must be real values: a 0 here is not "unset", it is a threshold of 0. --
+amount_tolerance = 0.1          # rupees; used when comparing two money values
+MoM_variance_percentage = 0.15  # 15%; check_mom_variance does not read this yet
+OT_limit = 0.25                 # overtime above 25% of base salary is flagged
+ESI_wage_boundary = 21000       # verify against the current statutory limit
+ESI_band = 3000                 # how far below the limit counts as "near"
+ot_z_threshold = 1.5            # Z-score cut-off for department overtime hotspots
 
-EXPECTED_COLUMNS = {
-    "payroll_register": payroll_cols,
-    "hris_export": hris_cols,
-    "gl_dump": gl_cols,
-}
-
-department=[]
-designation=[]
-category=[]
-Allowed_Employment_Status=[]
-location=[]
-MoM_variance_percentage=0
-OT_limit=0
-ESI_wage_boundary=0
-amount_tolerance=0
+overtime_eligible = []

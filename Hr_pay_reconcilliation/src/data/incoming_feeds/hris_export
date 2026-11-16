@@ -1,0 +1,21 @@
+Employee_ID,Employee_Name,Department,Designation,Category,Date_Of_Joining,Date_Of_Leaving,Employment_Status,Base_Salary_HRIS,Bank_Name,Bank_Account,UAN_Number,PAN_Number,Location
+E0001,Divya Patel,OPD,Staff_Nurse,Nursing,2022-11-27,,Active,27093.07,SBI,XXXX9935,UAN193349856,XXXXX7912X,Main_Campus
+E0002,Kiran Hegde,HR,Senior_Consultant,Clinical,2017-01-15,,Active,153980.4,HDFC,XXXX9928,UAN550455977,XXXXX4611X,Branch_Koramangala
+E0003,Deepak Das,Radiology,Pharmacist,Allied_Health,2023-02-06,,Active,29168.07,HDFC,XXXX6514,UAN209747451,XXXXX2519X,Branch_Koramangala
+E0004,Venkat Singh,Accounts,Staff_Nurse,Nursing,2018-06-12,2024-10-15,Terminated,25651.76,Axis,XXXX9785,UAN234031070,XXXXX7201X,Main_Campus
+E0005,Padma Joshi,HR,Driver,Support,2021-08-21,,Active,19346.02,SBI,XXXX1750,UAN810026086,XXXXX4733X,Branch_Koramangala
+E0006,Prakash Singh,Pharmacy,Head_Nurse,Nursing,2015-09-21,,Active,57713.69,ICICI,XXXX3664,UAN497478786,XXXXX6820X,Main_Campus
+E0007,Vikram Murthy,Housekeeping,Pharmacist,Allied_Health,2022-04-03,,On_Leave,27567.08,Canara,XXXX5010,UAN275452091,XXXXX8573X,Branch_Koramangala
+E0008,Asha Patel,Housekeeping,Pharmacist,Allied_Health,2022-04-22,,On_Leave,29864.24,PNB,XXXX1916,UAN345938494,XXXXX1525X,Branch_Koramangala
+E0009,Rekha Bhat,Canteen,IT_Support,Admin,2015-05-02,,Active,35768.71,HDFC,XXXX9179,UAN524806516,XXXXX8517X,Main_Campus
+E0010,Asha Shetty,Surgery,Pharmacist,Allied_Health,2017-05-10,,Active,36205.21,Axis,XXXX7543,UAN488690725,XXXXX4593X,Main_Campus
+E0011,Sunita Nair,General_Ward,Canteen_Staff,Support,2015-08-11,,Active,15509.78,PNB,XXXX7916,UAN740389325,XXXXX2040X,Branch_Koramangala
+E0012,Asha Kumar,Housekeeping,IT_Support,Admin,2019-11-03,2023-10-23,Terminated,35810.83,Canara,XXXX9797,UAN906248900,XXXXX5371X,Branch_Whitefield
+E0013,Swathi Iyer,Pharmacy,HR_Executive,Admin,2017-11-18,,Active,28055.17,Canara,XXXX5315,UAN637500247,XXXXX3927X,Branch_Whitefield
+E0014,Sunil Murthy,OPD,Staff_Nurse,Nursing,2017-12-08,,On_Leave,27292.59,PNB,XXXX3646,UAN679153816,XXXXX9689X,Main_Campus
+E0015,Kavitha Joshi,Canteen,HR_Executive,Admin,2014-10-22,,Active,44750.46,PNB,XXXX6038,UAN357109965,XXXXX1949X,Main_Campus
+E0016,Revathi Reddy,Accounts,Head_Nurse,Nursing,2022-10-18,,Active,55654.12,HDFC,XXXX3103,UAN808402051,XXXXX8787X,Branch_Whitefield
+E0017,Venkat Das,OPD,Radiographer,Allied_Health,2020-07-04,,Active,48578.27,PNB,XXXX4295,UAN865523129,XXXXX6107X,Branch_Koramangala
+E0018,Harish Nair,OPD,Accounts_Officer,Admin,2020-05-23,,Active,39493.95,ICICI,XXXX1344,UAN731691672,XXXXX4770X,Branch_Whitefield
+E0019,Sunita Patel,ICU,Physiotherapist,Allied_Health,2015-05-21,,Active,43392.14,PNB,XXXX6413,UAN176082500,XXXXX9423X,Main_Campus
+E0020,Rekha Shetty,General_Ward,Pharmacist,Allied_Health,2020-01-13,,On_Leave,35850.29,Union_Bank,XXXX8744,UAN360916298,XXXXX8749X,Branch_Koramangala

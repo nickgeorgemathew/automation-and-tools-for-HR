@@ -99,7 +99,7 @@ def dept_cost_summary(conn, pay_period: str) -> list[dict]:
     Returns list of dicts:
       { department, headcount, total_gross, total_net, total_ot }
     """
-    df=conn.execute("""SELECT Department,COUNT(DISTINCT Employee_ID) AS head_count,SUM(Gross_Pay) AS total_gross,SUM(Net_pay) AS total_net,SUM(Overtime) AS total_ot
+    df=conn.execute("""SELECT Department,COUNT(DISTINCT Employee_ID) AS headcount,SUM(Gross_Pay) AS total_gross,SUM(Net_pay) AS total_net,SUM(Overtime) AS total_ot
             FROM fact_payroll
             WHERE pay_period=? AND COALESCE(Payment_Mode, '') <> 'Manual_Adjustment' 
             GROUP BY Department            

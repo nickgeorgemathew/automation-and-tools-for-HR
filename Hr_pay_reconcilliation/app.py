@@ -38,7 +38,9 @@ insights = load_insights(selected)
 st.caption(f"Pay Period: {selected}")
 
 if insights:
+    
     dept_df = pd.DataFrame(insights.get("dept_costs", []))
+    dept_df.columns = [c.lower() for c in dept_df.columns]  # normalize to lowercase
     risk_df = pd.DataFrame(insights.get("risk_ranked", []))
 
     total_gross  = dept_df["total_gross"].sum() if not dept_df.empty else 0
