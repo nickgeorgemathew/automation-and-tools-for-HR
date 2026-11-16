@@ -1,425 +1,170 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional
-from datetime import datetime
-from config import settings
+"""
+Schema_validator.py
+-------------------
+Row-level contracts for the three feeds. Field names match the CSV headers exactly
+(including case), and field ORDER matches the warehouse tables.
+
+A row is rejected only for MALFORMED data (bad ID, unknown department, impossible
+date, negative money). Business discrepancies (wrong salary, wrong GL amount) are
+NOT rejected here: they must reach the reconciliation engine so they get flagged.
+"""
 import logging
+import re
+from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from config import settings
+
+logger = logging.getLogger("pipeline")
+
+EMP_ID = re.compile(r"^E\d{4,}$")                 # E0001, E9901
+MASKED_ACCOUNT = re.compile(r"^[Xx*\d]{4,20}$")   # masked (XXXX2679) or plain digits are both valid
 
 
-"""Change the col names according to the files being used,implement flexible or find actual column names"""
+def _check_employee_id(v: str) -> str:
+    if not isinstance(v, str) or not EMP_ID.match(v):
+        raise ValueError(f"Employee_ID must look like E0001, got {v!r}")
+    return v
 
-logger=logging.getLogger("pipeline")
+
+def _check_in(v: str, allowed: list, label: str) -> str:
+    if v not in allowed:
+        raise ValueError(f"{label} {v!r} is not an allowed value")
+    return v
+
+
+def _not_future(v: date, label: str) -> date:
+    if v > date.today():
+        raise ValueError(f"{label} {v} is in the future")
+    return v
+
 
 class HRISRecord(BaseModel):
     Employee_ID: str
-    Employee_Name: str
+    Employee_Name: str = Field(min_length=1)
     Department: str
     Designation: str
     Category: str
-    Date_Of_Joining: datetime
-    Date_Of_Leaving: Optional[datetime] = None
+    Date_Of_Joining: date
+    Date_Of_Leaving: Optional[date] = None
     Employment_Status: str
-    Base_Salary_HRIS: float
-    Bank_Name: str
+    Base_Salary_HRIS: float = Field(ge=0)
+    Bank_Name: str = Field(min_length=1)
     Bank_Account: str
     UAN_Number: str
     PAN_Number: str
     Location: str
 
-    @field_validator('Employee_ID')
+    _emp = field_validator("Employee_ID")(lambda cls, v: _check_employee_id(v))
+    _dept = field_validator("Department")(lambda cls, v: _check_in(v, settings.department, "Department"))
+    _desig = field_validator("Designation")(lambda cls, v: _check_in(v, settings.designation, "Designation"))
+    _cat = field_validator("Category")(lambda cls, v: _check_in(v, settings.category, "Category"))
+    _status = field_validator("Employment_Status")(
+        lambda cls, v: _check_in(v, settings.Allowed_Employment_Status, "Employment_Status"))
+    _loc = field_validator("Location")(lambda cls, v: _check_in(v, settings.location, "Location"))
+    _doj = field_validator("Date_Of_Joining")(lambda cls, v: _not_future(v, "Date_Of_Joining"))
+
+    @field_validator("Bank_Account")
     @classmethod
-    def employee_id_fix(cls,v):
-        if not v[:].isdigit():
-            logger.error("Employee ID is not Valid,must be digits")
-            raise ValueError("Employee ID is not Valid,must be digits")
+    def bank_account(cls, v):
+        # masked accounts such as XXXX2679 are VALID (they are how the HRIS exports them)
+        if not MASKED_ACCOUNT.match(v):
+            raise ValueError("Bank_Account must be digits and/or X-masked")
         return v
 
-    @field_validator('Department')
+    @field_validator("UAN_Number")
     @classmethod
-    def department_check(cls,v):
-        if v not in settings.department:
-            logger.error("Department is not valid")
-            raise ValueError("Department is not valid")
+    def uan(cls, v):
+        if len(v) != 12:
+            raise ValueError(f"UAN_Number must be 12 characters, got {len(v)}")
         return v
 
-    @field_validator('Designation')
+    @field_validator("PAN_Number")
     @classmethod
-    def designation(cls,v):
-        if v not in settings.designation:
-            logger.error("Designation is not valid")
-            raise ValueError("Designation is not valid")
+    def pan(cls, v):
+        if len(v) != 10:
+            raise ValueError(f"PAN_Number must be 10 characters, got {len(v)}")
         return v
 
-    @field_validator('Category')
-    @classmethod
-    def category(cls,v):
-        if v not in settings.category:
-            logger.error("Category is not valid")
-            raise ValueError("Category is not valid")
-        return v
-
-    @field_validator('Date_Of_Joining')
-    @classmethod
-    def date_of_joining(cls,v):
-        if v > datetime.today():
-            logger.error("Date Of Joining is not valid")  
-            raise ValueError("Date Of Joining is not valid")          
-        return v
-    
-    @field_validator('Employment_Status')
-    @classmethod
-    def employment_status(cls,v):
-        if v not in settings.Allowed_Employment_Status:
-            logger.error("Employment Status is not valid")
-            raise ValueError("Employment Status is not valid")
-        return v
-        
-    # @field_validator('Base_Salary_HRIS')
-    # @classmethod
-    # def base_salary_hris(cls,v):
-    #         if v < 0:
-    #             logger.error("Base Salary HRIS is not valid")  
-    #             raise ValueError("Base Salary HRIS is not valid")          
-    #         return v
-
-
-    # @field_validator('Bank_Name')
-    # @classmethod
-    # def bank_name(cls,v):
-    #         if not v or not str(v).strip():
-    #             logger.error("Bank Name is not valid")  
-    #             raise ValueError("Bank Name is not valid")          
-    #         return v
-
-
-    # @field_validator('Bank_Account')
-    # @classmethod
-    # def bank_account(cls,v):
-    #         if not v or not str(v).strip():
-    #             logger.error("Bank Account is not valid")  
-    #             raise ValueError("Bank Account is not valid")          
-    #         return v
-        
-
-    @field_validator('UAN_Number')
-    @classmethod
-    def uan_number(cls,v):
-            if len(v) > 12:
-                logger.error("UAN Number is not valid (Length greater than 12)")  
-                raise ValueError("UAN Number is not valid(Length greater than 12)")
-            elif len(v) < 12:
-                logger.error("UAN Number is not valid (Length less than 12)")  
-                raise ValueError("UAN Number is not valid(Length less than 12)")
-            return v
-
-    
-    @field_validator('PAN_Number')
-    @classmethod
-    def pan_number(cls,v):
-            if len(v)>10:
-                logger.error("PAN Number is not valid(Length greater than 10)")  
-                raise ValueError("PAN Number is not valid(Length greater than 10)")
-            elif len(v)< 10:
-                logger.error("PAN Number is not valid(Length less than 10)")  
-                raise ValueError("PAN Number is not valid(Length less than 10)")          
-            return v
-            
-    @field_validator('Location')
-    @classmethod
-    def location(cls,v):
-            if v not in settings.location:
-                logger.error("Location is not valid")  
-                raise ValueError("Location is not valid")          
-            return v
-
-
-class FinanceLedger(BaseModel):
-    GL_Entry_ID:str
-    Employee_ID:str
-    Department:str
-    Pay_Period:datetime
-    GL_Account_Code:str
-    GL_Amount_Posted:float
-    Payroll_Net_Pay_Reference:float
-    Posting_Date:datetime
-    Posted_By:str
-    GL_Remarks:Optional[str] = None
-    
-    @field_validator('Employee_ID')
-    @classmethod
-    def employee_id_fix(cls,v):
-        if not v[:].isdigit():
-            logger.error("Employee ID is not Valid,must be digits")
-            raise ValueError("Employee ID is not Valid,must be digits")
-        return v
-
-    @field_validator('Department')
-    @classmethod
-    def department_check(cls,v):
-        if v not in settings.department:
-            logger.error("Department is not valid")
-            raise ValueError("Department is not valid")
-        return v
-    
-    @field_validator('Pay_Period')
-    @classmethod
-    def pay_period(cls,v):
-        if v > datetime.today():
-            logger.error("Pay Period is not valid")
-            raise ValueError("Pay Period is not valid")
-        return v
-
-    @field_validator('GL_Account_Code')
-    @classmethod
-    def gl_account_code(cls,v):
-        if not v or not str(v).strip():
-            logger.error("GL Account Code is not valid")
-            raise ValueError("GL Account Code is not valid")
-        return v
-
-    @field_validator('GL_Amount_Posted')
-    @classmethod
-    def gl_amount_posted(cls,v):
-        if v < 0:
-            logger.error("GL Amount Posted is less than 0")
-            raise ValueError("GL Amount Posted is less than 0")
-        return v
-
-    @field_validator('Payroll_Net_Pay_Reference')
-    @classmethod
-    def payroll_net_pay_reference(cls,v):
-        if v < 0:
-            logger.error("Payroll Net Pay Reference is less than 0")
-            raise ValueError("Payroll Net Pay Reference is less than 0")
-        return v
-   
-    @field_validator('Posting_Date')
-    @classmethod
-    def posting_date(cls,v):
-        if v > datetime.today():
-            logger.error("Posting Date is not valid")
-            raise ValueError("Posting Date is not valid")
-        return v
-
-    @field_validator('Posted_By')
-    @classmethod
-    def posted_by(cls,v):
-        if not v or not str(v).strip():
-            logger.error("Posted By is not valid")
-            raise ValueError("Posted By is not valid")
-        return v
-
-    @field_validator('GL_Remarks')
-    @classmethod
-    def gl_remarks(cls,v):
-        return v
+    @model_validator(mode="after")
+    def cross_field_rules(self):
+        if self.Date_Of_Leaving and self.Date_Of_Leaving < self.Date_Of_Joining:
+            raise ValueError("Date_Of_Leaving is before Date_Of_Joining")
+        # v2: a zero salary is only acceptable for someone who has left
+        if self.Base_Salary_HRIS == 0 and self.Employment_Status != "Terminated":
+            raise ValueError("Base_Salary_HRIS is 0 for a non-terminated employee")
+        return self
 
 
 class PayrollRegister(BaseModel):
-    Employee_ID:str
-    Employee_Name:str
-    Department:str
-    Pay_Period:datetime
-    Base_Salary_Payroll:float
-    Basic_salary:float
-    HRA:float
-    DA:float
-    Transport_Allowance:Optional[float]= None
-    Medical_Allowance:float
-    Special_Allowance:float
-    Overtime:float
-    Gross_Pay:float
-    PF_deduction:float
-    ESI_deduction:float
-    TDS_deduction:float
-    PT_deduction:float
-    Loan_deduction:float
-    Total_deductions:float
-    Net_pay:float
-    Payment_Mode:str
-    Payment_Status:str
-    Payroll_Run_ID:str
-    Remarks:str
+    Employee_ID: str
+    Employee_Name: str = Field(min_length=1)
+    Department: str
+    Pay_Period: date
+    Base_Salary_Payroll: float = Field(ge=0)
+    Basic_Salary: float = Field(ge=0)
+    HRA: float = Field(ge=0)
+    DA: float = Field(ge=0)
+    Transport_Allowance: Optional[float] = Field(default=None, ge=0)
+    Medical_Allowance: float = Field(ge=0)
+    Special_Allowance: float = Field(ge=0)
+    Overtime: float = Field(ge=0)
+    Gross_Pay: float = Field(ge=0)
+    PF_Deduction: float = Field(ge=0)
+    ESI_Deduction: float = Field(ge=0)
+    TDS_Deduction: float = Field(ge=0)
+    PT_Deduction: float = Field(ge=0)
+    Loan_Deduction: float = Field(ge=0)
+    Total_Deductions: float = Field(ge=0)
+    Net_Pay: float = Field(ge=0)
+    Payment_Mode: str = Field(min_length=1)
+    Payment_Status: str = Field(min_length=1)
+    Payroll_Run_ID: str = Field(min_length=1)
+    Remarks: Optional[str] = None
 
-    @field_validator('Employee_ID')
+    _emp = field_validator("Employee_ID")(lambda cls, v: _check_employee_id(v))
+    _dept = field_validator("Department")(lambda cls, v: _check_in(v, settings.department, "Department"))
+    _period = field_validator("Pay_Period")(lambda cls, v: _not_future(v, "Pay_Period"))
+
+    @model_validator(mode="after")
+    def base_salary_rule(self):
+        # Manual adjustment rows legitimately carry a base salary of 0
+        if self.Base_Salary_Payroll <= 0 and self.Payment_Mode != "Manual_Adjustment":
+            raise ValueError("Base_Salary_Payroll must be > 0 unless Payment_Mode is Manual_Adjustment")
+        return self
+
+
+class FinanceLedger(BaseModel):
+    GL_Entry_ID: str = Field(min_length=1)
+    Employee_ID: str
+    Department: str
+    Pay_Period: date
+    GL_Account_Code: str = Field(min_length=1)
+    GL_Amount_Posted: float = Field(ge=0)
+    Payroll_Net_Pay_Reference: float = Field(ge=0)
+    Posting_Date: date
+    Posted_By: str = Field(min_length=1)
+    GL_Remarks: Optional[str] = None
+
+    _emp = field_validator("Employee_ID")(lambda cls, v: _check_employee_id(v))
+    _dept = field_validator("Department")(lambda cls, v: _check_in(v, settings.department, "Department"))
+    _period = field_validator("Pay_Period")(lambda cls, v: _not_future(v, "Pay_Period"))
+    _posted = field_validator("Posting_Date")(lambda cls, v: _not_future(v, "Posting_Date"))
+
+    @field_validator("GL_Account_Code", "Posted_By")
     @classmethod
-    def employee_id_fix(cls,v):
-        if not v[:].isdigit():
-            logger.error("Employee ID is not Valid,must be digits")
-            raise ValueError("Employee ID is not Valid,must be digits")
+    def not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("must not be blank")
         return v
 
-    @field_validator('Employee_Name')
-    @classmethod
-    def employee_name(cls,v):
-        if not v or not str(v).strip():
-            logger.error("Employee Name is not valid")
-            raise ValueError("Employee Name is not valid")
-        return v
 
-    @field_validator('Department')
-    @classmethod
-    def department_check(cls,v):
-        if v not in settings.department:
-            logger.error("Department is not valid")
-            raise ValueError("Department is not valid")
-        return v
+SCHEMA_MAP = {
+    "hris_export": HRISRecord,
+    "payroll_register": PayrollRegister,
+    "gl_dump": FinanceLedger,
+}
 
-    @field_validator('Pay_Period')
-    @classmethod
-    def pay_period(cls,v):
-        if v > datetime.today():
-            logger.error("Pay Period is not valid")
-            raise ValueError("Pay Period is not valid")
-        return v
-
-    @field_validator('Base_Salary_Payroll')
-    @classmethod
-    def base_salary_payroll(cls,v):
-        if v <=0:
-            logger.error("Base Salary Payroll is less than or equal to 0")
-            raise ValueError("Base Salary Payroll is less than or equal to 0")
-        return v
-
-    @field_validator('Basic_salary')
-    @classmethod
-    def basic_salary(cls,v):
-        if v <0:
-            logger.error("Basic Salary is less than 0")
-            raise ValueError("Basic Salary is less than 0")
-        return v
-
-    @field_validator('HRA')
-    @classmethod
-    def hra(cls,v):
-        if v <0:
-            logger.error("HRA is less than 0")
-            raise ValueError("HRA is less than 0")
-        return v
-
-    @field_validator('DA')
-    @classmethod
-    def da(cls,v):
-        if v <0:
-            logger.error("DA is less than 0")
-            raise ValueError("DA is less than 0")
-        return v
-
-    @field_validator('Transport_Allowance')
-    @classmethod
-    def transport_allowance(cls,v):
-        if v is not None and v <0:
-            logger.error("Transport Allowance is less than 0")
-            raise ValueError("Transport Allowance is less than 0")
-        return v
-
-    @field_validator('Medical_Allowance')
-    @classmethod
-    def medical_allowance(cls,v):
-        if v <0:
-            logger.error("Medical Allowance is less than 0")
-            raise ValueError("Medical Allowance is less than 0")
-        return v
-
-    @field_validator('Special_Allowance')
-    @classmethod
-    def special_allowance(cls,v):
-        if v <0:
-            logger.error("Special Allowance is less than 0")
-            raise ValueError("Special Allowance is less than 0")
-        return v
-
-    @field_validator('Overtime')
-    @classmethod
-    def overtime(cls,v):
-        if v <0:
-            logger.error("Overtime is less than 0")
-            raise ValueError("Overtime is less than 0")
-        return v
-
-    @field_validator('Gross_Pay')
-    @classmethod
-    def gross_pay(cls,v):
-        if v <0:
-            logger.error("Gross Pay is less than 0")
-            raise ValueError("Gross Pay is less than 0")
-        return v
-
-    @field_validator('PF_deduction')
-    @classmethod
-    def pf_deduction(cls,v):
-        if v <0:
-            logger.error("PF Deduction is less than 0")
-            raise ValueError("PF Deduction is less than 0")
-        return v
-
-    @field_validator('ESI_deduction')
-    @classmethod
-    def esi_deduction(cls,v):
-        if v <0:
-            logger.error("ESI Deduction is less than 0")
-            raise ValueError("ESI Deduction is less than 0")
-        return v
-
-    @field_validator('TDS_deduction')
-    @classmethod
-    def tds_deduction(cls,v):
-        if v <0:
-            logger.error("TDS Deduction is less than 0")
-            raise ValueError("TDS Deduction is less than 0")
-        return v
-
-    @field_validator('PT_deduction')
-    @classmethod
-    def pt_deduction(cls,v):
-        if v <0:
-            logger.error("PT Deduction is less than 0")
-            raise ValueError("PT Deduction is less than 0")
-        return v
-
-    @field_validator('Loan_deduction')
-    @classmethod
-    def loan_deduction(cls,v):
-        if v <0:
-            logger.error("Loan Deduction is less than 0")
-            raise ValueError("Loan Deduction is less than 0")
-        return v
-
-    @field_validator('Total_deductions')
-    @classmethod
-    def total_deductions(cls,v):
-        if v <0:
-            logger.error("Total Deductions is less than 0")
-            raise ValueError("Total Deductions is less than 0")
-        return v
-
-    @field_validator('Net_pay')
-    @classmethod
-    def net_pay(cls,v):
-        if v <0:
-            logger.error("Net Pay is less than 0")
-            raise ValueError("Net Pay is less than 0")
-        return v
-
-    @field_validator('Payment_Mode')
-    @classmethod
-    def payment_mode(cls,v):
-        if not v or not str(v).strip():
-            logger.error("Payment Mode is not valid")
-            raise ValueError("Payment Mode is not valid")
-        return v
-
-    @field_validator('Payment_Status')
-    @classmethod
-    def payment_status(cls,v):
-        if not v or not str(v).strip():
-            logger.error("Payment Status is not valid")
-            raise ValueError("Payment Status is not valid")
-        return v
-
-    @field_validator('Payroll_Run_ID')
-    @classmethod
-    def payroll_run_id(cls,v):
-        if not v or not str(v).strip():
-            logger.error("Payroll Run ID is not valid")
-            raise ValueError("Payroll Run ID is not valid")
-        return v
+__all__ = ["HRISRecord", "PayrollRegister", "FinanceLedger", "SCHEMA_MAP", "datetime"]

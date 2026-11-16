@@ -1,151 +1,132 @@
 """
-mock_generator.py
------------------
-Generates three realistic mock CSV feeds for an Indian hospital payroll
-reconciliation system:
+mock_generator.py  (v2)
+-----------------------
+Generates three mock hospital feeds for N consecutive months, keyed by Pay_Period:
 
-    1. hris_export.csv       — HR master data (source of truth for headcount)
-    2. payroll_register.csv  — Monthly payroll disbursements
-    3. gl_dump.csv           — General Ledger finance postings
+    hris_export.csv       HR master snapshot (one row per employee)
+    payroll_register.csv  Payroll rows for every month
+    gl_dump.csv           Finance postings for every month
+    injected_faults.json  GROUND TRUTH: exactly what the engine must find
 
-Intentional errors injected (these are what your reconciliation engine must catch):
-    E1 — CRITICAL_TERMINATED_PAID   : Terminated employee still receiving gross pay
-    E2 — ORPHAN_PAYROLL_RECORD      : Employee ID in payroll not present in HRIS
-    E3 — BASE_RATE_MISMATCH         : HRIS base salary != Payroll base salary
-    E4 — OFF_CYCLE_MANUAL_ADJ       : Manual adjustment payment with no HRIS record
-    E5 — GL_NET_MISMATCH            : GL posted amount != Payroll net pay
+Earlier months are CLEAN. Faults are injected into the LAST month only, so the
+reconciliation tests can assert "finds exactly the faults you injected".
+
+Injected faults (last month), one employee each unless stated:
+    E1  CRITICAL_TERMINATED_PAID  2 employees who left BEFORE the first period, still paid
+    E2  ORPHAN_PAYROLL_RECORD     2 ghost IDs (E9901, E9902) paid but absent from HRIS
+    E3  BASE_RATE_MISMATCH        3 employees, payroll base 8-12% above HRIS
+    E4  OFF_CYCLE_MANUAL_ADJ      2 manual adjustment rows (Payment_Mode = Manual_Adjustment)
+    E5  GL_NET_MISMATCH           2 employees where finance posted a different amount
+    E6  DUPLICATE_PAYMENT         1 employee paid twice in the same run
+    E7  MOM_VARIANCE (40% jump)   1 employee, special allowance +40% of base
+    E8  OT_ANOMALY                1 employee, overtime = 60% of basic
+Also a legitimate mid-month leaver (must NOT be flagged) and natural
+ESI-band employees (low-pay roles) that raise ESI_BOUNDARY_RISK.
 
 Usage:
     python src/mock_generator.py
-    python src/mock_generator.py --employees 100 --month 2024-10
-    python src/mock_generator.py --seed 99  # reproducible output
+    python src/mock_generator.py --employees 100 --month 2024-10 --months 3 --seed 99
 """
 
 import argparse
+import copy
+import json
 import random
-import hashlib
 from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 
 # ---------------------------------------------------------------------------
-# Constants — Indian hospital domain knowledge baked in
+# Domain constants
 # ---------------------------------------------------------------------------
-
 DEPARTMENTS = [
     "Emergency", "ICU", "General_Ward", "OPD", "Surgery",
     "Radiology", "Pathology", "Pharmacy", "Admin", "HR",
     "Housekeeping", "Security", "Accounts", "IT", "Canteen",
 ]
 
-# Role → (category, base_salary_min, base_salary_max)
+# Role -> (category, base_salary_min, base_salary_max)
+# Visiting_Consultant is intentionally absent: they are paid per procedure,
+# outside monthly payroll, and v2 only allows a zero HRIS salary for leavers.
 ROLES = {
-    # Clinical
-    "Senior_Consultant":        ("Clinical",     150000, 300000),
-    "Junior_Resident_Doctor":   ("Clinical",      60000,  90000),
-    "Visiting_Consultant":      ("Clinical",           0,      0),  # Per-procedure, not monthly
-    "Head_Nurse":               ("Nursing",        45000,  65000),
-    "Staff_Nurse":              ("Nursing",        25000,  40000),
-    "ANM":                      ("Nursing",        18000,  28000),
-    # Allied Health
-    "Radiographer":             ("Allied_Health",  30000,  50000),
-    "Lab_Technician":           ("Allied_Health",  22000,  38000),
-    "Physiotherapist":          ("Allied_Health",  28000,  45000),
-    "Pharmacist":               ("Allied_Health",  25000,  40000),
-    # Admin & Support
-    "HR_Manager":               ("Admin",          55000,  80000),
-    "HR_Executive":             ("Admin",          28000,  45000),
-    "Accounts_Officer":         ("Admin",          35000,  55000),
-    "IT_Support":               ("Admin",          25000,  40000),
-    "Admin_Executive":          ("Admin",          22000,  35000),
-    # Support Staff
-    "Housekeeping_Staff":       ("Support",        14000,  18000),
-    "Security_Guard":           ("Support",        15000,  20000),
-    "Canteen_Staff":            ("Support",        13000,  17000),
-    "Driver":                   ("Support",        18000,  25000),
+    "Senior_Consultant":      ("Clinical",      150000, 300000),
+    "Junior_Resident_Doctor": ("Clinical",       60000,  90000),
+    "Head_Nurse":             ("Nursing",        45000,  65000),
+    "Staff_Nurse":            ("Nursing",        25000,  40000),
+    "ANM":                    ("Nursing",        18000,  28000),
+    "Radiographer":           ("Allied_Health",  30000,  50000),
+    "Lab_Technician":         ("Allied_Health",  22000,  38000),
+    "Physiotherapist":        ("Allied_Health",  28000,  45000),
+    "Pharmacist":             ("Allied_Health",  25000,  40000),
+    "HR_Manager":             ("Admin",          55000,  80000),
+    "HR_Executive":           ("Admin",          28000,  45000),
+    "Accounts_Officer":       ("Admin",          35000,  55000),
+    "IT_Support":             ("Admin",          25000,  40000),
+    "Admin_Executive":        ("Admin",          22000,  35000),
+    "Housekeeping_Staff":     ("Support",        14000,  18000),
+    "Security_Guard":         ("Support",        15000,  20000),
+    "Canteen_Staff":          ("Support",        13000,  17000),
+    "Driver":                 ("Support",        18000,  25000),
 }
 
 EMPLOYEE_STATUS = ["Active", "Active", "Active", "Active", "Terminated", "On_Leave"]
-
-INDIAN_FIRST_NAMES = [
-    "Anil", "Priya", "Rahul", "Sunita", "Vikram", "Meena", "Rajesh",
-    "Kavitha", "Suresh", "Anitha", "Deepak", "Lakshmi", "Mohan", "Rekha",
-    "Kiran", "Pooja", "Sanjay", "Divya", "Ramesh", "Nisha", "Ashok",
-    "Shilpa", "Vinod", "Usha", "Prakash", "Geeta", "Ganesh", "Swathi",
-    "Harish", "Bharathi", "Nikhil", "Revathi", "Sunil", "Manjula",
-    "Ravi", "Asha", "Mahesh", "Sarala", "Venkat", "Padma",
+FIRST_NAMES = [
+    "Anil", "Priya", "Rahul", "Sunita", "Vikram", "Meena", "Rajesh", "Kavitha", "Suresh",
+    "Anitha", "Deepak", "Lakshmi", "Mohan", "Rekha", "Kiran", "Pooja", "Sanjay", "Divya",
+    "Ramesh", "Nisha", "Ashok", "Shilpa", "Vinod", "Usha", "Prakash", "Geeta", "Ganesh",
+    "Swathi", "Harish", "Bharathi", "Nikhil", "Revathi", "Sunil", "Manjula", "Ravi", "Asha",
+    "Mahesh", "Sarala", "Venkat", "Padma",
 ]
-
-INDIAN_LAST_NAMES = [
-    "Kumar", "Sharma", "Reddy", "Nair", "Pillai", "Iyer", "Rao",
-    "Patel", "Singh", "Verma", "Gupta", "Joshi", "Menon", "Das",
-    "Krishnan", "Naidu", "Hegde", "Shetty", "Bhat", "Murthy",
+LAST_NAMES = [
+    "Kumar", "Sharma", "Reddy", "Nair", "Pillai", "Iyer", "Rao", "Patel", "Singh", "Verma",
+    "Gupta", "Joshi", "Menon", "Das", "Krishnan", "Naidu", "Hegde", "Shetty", "Bhat", "Murthy",
 ]
-
 BANKS = ["SBI", "HDFC", "ICICI", "Axis", "Union_Bank", "Canara", "PNB"]
-
-PAY_PERIOD = "2024-10"  # default, overridden by --month arg
+LOCATIONS = ["Main_Campus", "Branch_Koramangala", "Branch_Whitefield"]
+GL_ACCOUNTS = ["6001-Salaries", "6002-Wages", "6003-Allowances"]
+GL_USERS = ["finance_auto_sync", "accounts_officer_01", "accounts_officer_02"]
 
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Date helpers
 # ---------------------------------------------------------------------------
-
-def generate_employee_id(index: int) -> str:
-    """Format: E followed by zero-padded 4-digit number. E0001, E0002, ..."""
-    return f"E{index:04d}"
+def month_start(ym: str) -> date:
+    return date.fromisoformat(ym + "-01")
 
 
-def random_name(rng: random.Random) -> str:
-    return f"{rng.choice(INDIAN_FIRST_NAMES)} {rng.choice(INDIAN_LAST_NAMES)}"
+def add_months(d: date, n: int) -> date:
+    idx = d.year * 12 + (d.month - 1) + n
+    return date(idx // 12, idx % 12 + 1, 1)
 
 
-def random_doj(rng: random.Random, years_back: int = 10) -> str:
-    """Random date of joining within the last N years."""
-    today = date.today()
-    start = today - timedelta(days=years_back * 365)
-    delta = rng.randint(0, (today - start).days - 365)  # at least 1 year tenure
-    return (start + timedelta(days=delta)).strftime("%Y-%m-%d")
+def month_end(d: date) -> date:
+    return add_months(d, 1) - timedelta(days=1)
 
 
-def random_dol(rng: random.Random, doj_str: str) -> str:
-    """Date of leaving — at least 6 months after DOJ."""
-    doj = date.fromisoformat(doj_str)
-    earliest_dol = doj + timedelta(days=180)
-    today = date.today()
-    if earliest_dol >= today:
-        earliest_dol = today - timedelta(days=30)
-    delta = rng.randint(0, (today - earliest_dol).days)
-    return (earliest_dol + timedelta(days=delta)).strftime("%Y-%m-%d")
+def rand_date(rng: random.Random, lo: date, hi: date) -> date:
+    return lo + timedelta(days=rng.randint(0, max((hi - lo).days, 0)))
 
 
+# ---------------------------------------------------------------------------
+# Statutory formulas (used for realistic deductions)
+# ---------------------------------------------------------------------------
 def compute_pf(basic: float) -> float:
-    """
-    Provident Fund: 12% employee + 12% employer on basic.
-    PF wage capped at ₹15,000 for mandatory contribution.
-    """
-    pf_wage = min(basic, 15000.0)
-    return round(pf_wage * 0.12, 2)
+    """PF: 12% employee share on basic, wage capped at 15,000."""
+    return round(min(basic, 15000.0) * 0.12, 2)
 
 
 def compute_esi(gross: float) -> float:
-    """
-    ESI: 0.75% employee contribution.
-    Applicable only if gross <= ₹21,000/month.
-    """
-    if gross <= 21000:
-        return round(gross * 0.0075, 2)
-    return 0.0
+    """ESI: 0.75% employee share, applicable only up to 21,000 gross."""
+    return round(gross * 0.0075, 2) if gross <= 21000 else 0.0
 
 
 def compute_tds(gross: float) -> float:
-    """Simplified TDS estimate — old regime slab approximation."""
+    """Simplified old-regime TDS estimate."""
     annual = gross * 12
     if annual <= 250000:
         return 0.0
-    elif annual <= 500000:
+    if annual <= 500000:
         tax = (annual - 250000) * 0.05
     elif annual <= 1000000:
         tax = 12500 + (annual - 500000) * 0.20
@@ -154,359 +135,260 @@ def compute_tds(gross: float) -> float:
     return round(tax / 12, 2)
 
 
-def compute_pt(gross: float, state: str = "Karnataka") -> float:
-    """
-    Professional Tax — Karnataka slabs (most common for Bengaluru hospitals).
-    Deducted monthly but capped at ₹2,400/year (₹200/month above ₹15,000).
-    """
+def compute_pt(gross: float) -> float:
+    """Karnataka professional tax slabs."""
     if gross > 15000:
         return 200.0
-    elif gross > 10000:
+    if gross > 10000:
         return 150.0
-    elif gross > 7500:
+    if gross > 7500:
         return 100.0
     return 0.0
 
 
-def build_salary_components(rng: random.Random, base_salary: float) -> dict:
-    """
-    Break base salary into standard Indian payroll components.
-    Returns dict of all pay components.
-    """
-    # Standard split: Basic = 40-50% of CTC
-    basic = round(base_salary * rng.uniform(0.40, 0.50), 2)
-    hra = round(basic * rng.uniform(0.40, 0.50), 2)           # HRA: 40-50% of basic
-    da = round(basic * rng.uniform(0.05, 0.15), 2)            # DA: 5-15% of basic
-    ta = round(rng.uniform(1000, 3000), 2)                    # Fixed transport allowance
-    medical_allowance = round(rng.uniform(500, 1500), 2)
-    special_allowance = round(base_salary - basic - hra - da - ta - medical_allowance, 2)
-    special_allowance = max(special_allowance, 0)
-
-    gross = round(basic + hra + da + ta + medical_allowance + special_allowance, 2)
-
-    # Overtime: nurses, housekeeping, security have variable OT
-    overtime = 0.0
-    if rng.random() < 0.25:  # 25% of employees have OT this month
-        overtime = round(rng.uniform(500, 5000), 2)
-
-    gross_with_ot = round(gross + overtime, 2)
-
-    # Deductions
-    pf = compute_pf(basic)
-    esi = compute_esi(gross_with_ot)
-    tds = compute_tds(gross_with_ot)
-    pt = compute_pt(gross_with_ot)
-    loan_deduction = round(rng.uniform(0, 2000), 2) if rng.random() < 0.15 else 0.0
-
-    total_deductions = round(pf + esi + tds + pt + loan_deduction, 2)
-    net_pay = round(gross_with_ot - total_deductions, 2)
-
+# ---------------------------------------------------------------------------
+# Salary structure: fixed per employee, so clean months only drift through OT
+# ---------------------------------------------------------------------------
+def salary_structure(rng: random.Random, base: float) -> dict:
     return {
-        "Basic_Salary": basic,
-        "HRA": hra,
-        "DA": da,
-        "Transport_Allowance": ta,
-        "Medical_Allowance": medical_allowance,
-        "Special_Allowance": special_allowance,
-        "Overtime": overtime,
-        "Gross_Pay": gross_with_ot,
-        "PF_Deduction": pf,
-        "ESI_Deduction": esi,
-        "TDS_Deduction": tds,
-        "PT_Deduction": pt,
-        "Loan_Deduction": loan_deduction,
-        "Total_Deductions": total_deductions,
-        "Net_Pay": net_pay,
+        "basic_pct": rng.uniform(0.40, 0.50),
+        "hra_pct": rng.uniform(0.40, 0.50),   # of basic
+        "da_pct": rng.uniform(0.05, 0.15),    # of basic
+        "ta": round(min(rng.uniform(1000, 3000), 0.05 * base), 2),
+        "med": round(min(rng.uniform(500, 1500), 0.03 * base), 2),
+        "loan": round(rng.uniform(0, 2000), 2) if rng.random() < 0.15 else 0.0,
+    }
+
+
+def components(st: dict, base: float, ot: float = 0.0, extra: float = 0.0) -> dict:
+    """Break base salary into pay components; gross = base + ot + extra."""
+    basic = round(base * st["basic_pct"], 2)
+    hra = round(basic * st["hra_pct"], 2)
+    da = round(basic * st["da_pct"], 2)
+    special = round(base - basic - hra - da - st["ta"] - st["med"] + extra, 2)
+    gross = round(basic + hra + da + st["ta"] + st["med"] + special + ot, 2)
+    pf, esi, tds, pt = compute_pf(basic), compute_esi(gross), compute_tds(gross), compute_pt(gross)
+    total = round(pf + esi + tds + pt + st["loan"], 2)
+    return {
+        "Basic_Salary": basic, "HRA": hra, "DA": da,
+        "Transport_Allowance": st["ta"], "Medical_Allowance": st["med"],
+        "Special_Allowance": special, "Overtime": round(ot, 2), "Gross_Pay": gross,
+        "PF_Deduction": pf, "ESI_Deduction": esi, "TDS_Deduction": tds,
+        "PT_Deduction": pt, "Loan_Deduction": st["loan"],
+        "Total_Deductions": total, "Net_Pay": round(gross - total, 2),
     }
 
 
 # ---------------------------------------------------------------------------
-# Generator 1: HRIS Export
+# HRIS
 # ---------------------------------------------------------------------------
-
-def generate_hris(n_employees: int, rng: random.Random) -> pd.DataFrame:
-    """
-    Simulates an HR Information System export.
-    This is the source of truth — who is (or was) employed.
-    """
-    records = []
-    roles = list(ROLES.keys())
-
-    for i in range(1, n_employees + 1):
-        emp_id = generate_employee_id(i)
+def generate_hris(n: int, rng: random.Random, first_period: date) -> pd.DataFrame:
+    """Dates are anchored to the FIRST pay period so the data is self-consistent:
+    leavers left before the first period; everyone else joined at least a year before it."""
+    rows = []
+    roles = list(ROLES)
+    for i in range(1, n + 1):
         role = rng.choice(roles)
-        category, sal_min, sal_max = ROLES[role]
-
-        # Visiting consultants are paid per procedure — skip from monthly HRIS salary
-        if role == "Visiting_Consultant":
-            base_salary = 0.0
-        else:
-            base_salary = round(rng.uniform(sal_min, sal_max), 2)
-
+        category, lo, hi = ROLES[role]
         status = rng.choice(EMPLOYEE_STATUS)
-        doj = random_doj(rng)
-        dol = random_dol(rng, doj) if status == "Terminated" else ""
-
-        dept = rng.choice(DEPARTMENTS)
-        bank = rng.choice(BANKS)
-        account_suffix = rng.randint(1000, 9999)
-
-        records.append({
-            "Employee_ID": emp_id,
-            "Employee_Name": random_name(rng),
-            "Department": dept,
+        if status == "Terminated":
+            doj = rand_date(rng, first_period - timedelta(days=3650), first_period - timedelta(days=800))
+            dol = rand_date(rng, first_period - timedelta(days=540), first_period - timedelta(days=1))
+        else:
+            doj = rand_date(rng, first_period - timedelta(days=3650), first_period - timedelta(days=365))
+            dol = None
+        rows.append({
+            "Employee_ID": f"E{i:04d}",
+            "Employee_Name": f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}",
+            "Department": rng.choice(DEPARTMENTS),
             "Designation": role,
             "Category": category,
-            "Date_Of_Joining": doj,
-            "Date_Of_Leaving": dol,
+            "Date_Of_Joining": doj.isoformat(),
+            "Date_Of_Leaving": dol.isoformat() if dol else "",
             "Employment_Status": status,
-            "Base_Salary_HRIS": base_salary,
-            "Bank_Name": bank,
-            "Bank_Account": f"XXXX{account_suffix}",
+            "Base_Salary_HRIS": round(rng.uniform(lo, hi), 2),
+            "Bank_Name": rng.choice(BANKS),
+            "Bank_Account": f"XXXX{rng.randint(1000, 9999)}",   # masked on purpose
             "UAN_Number": f"UAN{rng.randint(100000000, 999999999)}",
             "PAN_Number": f"XXXXX{rng.randint(1000, 9999)}X",
-            "Location": rng.choice(["Main_Campus", "Branch_Koramangala", "Branch_Whitefield"]),
+            "Location": rng.choice(LOCATIONS),
         })
-
-    return pd.DataFrame(records)
-
-
-# ---------------------------------------------------------------------------
-# Generator 2: Payroll Register
-# ---------------------------------------------------------------------------
-
-def generate_payroll(hris_df: pd.DataFrame, pay_period: str,
-                     rng: random.Random) -> pd.DataFrame:
-    """
-    Simulates a monthly payroll run.
-    Starts from HRIS active employees, then injects errors.
-    """
-    # Only Active employees get paid in a clean run
-    active = hris_df[hris_df["Employment_Status"] == "Active"].copy()
-
-    records = []
-    for _, row in active.iterrows():
-        if row["Base_Salary_HRIS"] == 0:
-            continue  # Visiting consultants handled separately
-        components = build_salary_components(rng, row["Base_Salary_HRIS"])
-        records.append({
-            "Employee_ID": row["Employee_ID"],
-            "Employee_Name": row["Employee_Name"],
-            "Department": row["Department"],
-            "Pay_Period": pay_period,
-            "Base_Salary_Payroll": row["Base_Salary_HRIS"],  # will be tampered for E3
-            **components,
-            "Payment_Mode": "Bank_Transfer",
-            "Payment_Status": "Processed",
-            "Payroll_Run_ID": f"RUN_{pay_period.replace('-', '')}",
-            "Remarks": "",
-        })
-
-    df = pd.DataFrame(records)
-
-    # -------------------------------------------------------------------
-    # Inject intentional errors
-    # -------------------------------------------------------------------
-
-    # E1 — CRITICAL_TERMINATED_PAID
-    # Pick 2 terminated employees and add them to payroll anyway
-    terminated = hris_df[hris_df["Employment_Status"] == "Terminated"].sample(
-        n=min(2, len(hris_df[hris_df["Employment_Status"] == "Terminated"])),
-        random_state=rng.randint(0, 9999)
-    )
-    e1_records = []
-    for _, row in terminated.iterrows():
-        if row["Base_Salary_HRIS"] == 0:
-            continue
-        components = build_salary_components(rng, row["Base_Salary_HRIS"])
-        e1_records.append({
-            "Employee_ID": row["Employee_ID"],
-            "Employee_Name": row["Employee_Name"],
-            "Department": row["Department"],
-            "Pay_Period": pay_period,
-            "Base_Salary_Payroll": row["Base_Salary_HRIS"],
-            **components,
-            "Payment_Mode": "Bank_Transfer",
-            "Payment_Status": "Processed",
-            "Payroll_Run_ID": f"RUN_{pay_period.replace('-', '')}",
-            "Remarks": "",  # intentionally blank — no flag raised by payroll team
-        })
-    if e1_records:
-        df = pd.concat([df, pd.DataFrame(e1_records)], ignore_index=True)
-
-    # E2 — ORPHAN_PAYROLL_RECORD
-    # Add a payment for an Employee_ID that doesn't exist in HRIS at all
-    ghost_ids = ["E9901", "E9902"]
-    for ghost_id in ghost_ids:
-        ghost_salary = round(rng.uniform(25000, 60000), 2)
-        components = build_salary_components(rng, ghost_salary)
-        df = pd.concat([df, pd.DataFrame([{
-            "Employee_ID": ghost_id,
-            "Employee_Name": f"Ghost Employee {ghost_id}",
-            "Department": rng.choice(DEPARTMENTS),
-            "Pay_Period": pay_period,
-            "Base_Salary_Payroll": ghost_salary,
-            **components,
-            "Payment_Mode": "Bank_Transfer",
-            "Payment_Status": "Processed",
-            "Payroll_Run_ID": f"RUN_{pay_period.replace('-', '')}",
-            "Remarks": "",
-        }])], ignore_index=True)
-
-    # E3 — BASE_RATE_MISMATCH
-    # Tamper base salary for 3 random active employees (raise by 8-15%)
-    mismatch_indices = df.sample(n=min(3, len(df)), random_state=42).index
-    for idx in mismatch_indices:
-        original = df.loc[idx, "Base_Salary_Payroll"]
-        tampered = round(original * rng.uniform(1.08, 1.15), 2)
-        df.loc[idx, "Base_Salary_Payroll"] = tampered
-        df.loc[idx, "Gross_Pay"] = round(df.loc[idx, "Gross_Pay"] + (tampered - original), 2)
-        df.loc[idx, "Net_Pay"] = round(df.loc[idx, "Net_Pay"] + (tampered - original), 2)
-
-    # E4 — OFF_CYCLE_MANUAL_ADJUSTMENT
-    # Add 2 manual adjustment entries (bonus/correction) not in HRIS
-    for k in range(1, 3):
-        # Pick a real active employee and give them an "adjustment"
-        if len(df) > 0:
-            sample_row = df[df["Employee_ID"].str.startswith("E0")].sample(1).iloc[0]
-            adj_amount = round(rng.uniform(3000, 15000), 2)
-            df = pd.concat([df, pd.DataFrame([{
-                "Employee_ID": sample_row["Employee_ID"],
-                "Employee_Name": sample_row["Employee_Name"],
-                "Department": sample_row["Department"],
-                "Pay_Period": pay_period,
-                "Base_Salary_Payroll": 0.0,
-                "Basic_Salary": 0.0,
-                "HRA": 0.0,
-                "DA": 0.0,
-                "Transport_Allowance": 0.0,
-                "Medical_Allowance": 0.0,
-                "Special_Allowance": adj_amount,
-                "Overtime": 0.0,
-                "Gross_Pay": adj_amount,
-                "PF_Deduction": 0.0,
-                "ESI_Deduction": 0.0,
-                "TDS_Deduction": 0.0,
-                "PT_Deduction": 0.0,
-                "Loan_Deduction": 0.0,
-                "Total_Deductions": 0.0,
-                "Net_Pay": adj_amount,
-                "Payment_Mode": "Manual_Adjustment",
-                "Payment_Status": "Processed",
-                "Payroll_Run_ID": f"ADJ_{pay_period.replace('-', '')}_{k:02d}",
-                "Remarks": "Manual off-cycle adjustment",
-            }])], ignore_index=True)
-
-    return df
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
-# Generator 3: GL Dump
+# Payroll + GL
 # ---------------------------------------------------------------------------
+def _row(emp: dict, period: date, base: float, comp: dict, mode="Bank_Transfer",
+         run=None, remarks="") -> dict:
+    return {
+        "Employee_ID": emp["Employee_ID"], "Employee_Name": emp["Employee_Name"],
+        "Department": emp["Department"], "Pay_Period": period.isoformat(),
+        "Base_Salary_Payroll": base, **comp,
+        "Payment_Mode": mode, "Payment_Status": "Processed",
+        "Payroll_Run_ID": run or f"RUN_{period:%Y%m}", "Remarks": remarks,
+    }
 
-def generate_gl(payroll_df: pd.DataFrame, rng: random.Random) -> pd.DataFrame:
-    """
-    Simulates a General Ledger export from the finance system.
-    Mostly mirrors payroll net pay, but with E5 mismatches injected.
-    """
-    records = []
 
-    for _, row in payroll_df.iterrows():
-        # E5 — GL_NET_MISMATCH: tamper GL amount for ~5% of records
-        if rng.random() < 0.05:
-            gl_amount = round(row["Net_Pay"] * rng.uniform(0.92, 1.08), 2)
-            gl_remark = "Posting_Discrepancy"
-        else:
-            gl_amount = row["Net_Pay"]
-            gl_remark = "Auto_Posted"
+def generate_payroll(hris: pd.DataFrame, periods: list[date], rng: random.Random):
+    """Returns (payroll_df, faults) where faults is the injected ground truth."""
+    emps = {r["Employee_ID"]: r for r in hris.to_dict("records")}
+    last, first = periods[-1], periods[0]
 
-        records.append({
-            "GL_Entry_ID": f"GL{rng.randint(100000, 999999)}",
-            "Employee_ID": row["Employee_ID"],
-            "Department": row["Department"],
-            "Pay_Period": row["Pay_Period"],
-            "GL_Account_Code": rng.choice(["6001-Salaries", "6002-Wages", "6003-Allowances"]),
-            "GL_Amount_Posted": gl_amount,
+    # A legitimate mid-month leaver in the last period: paid correctly, must NOT be flagged.
+    active_ids = [e for e, r in emps.items() if r["Employment_Status"] == "Active"]
+    mid_leaver = rng.choice(active_ids)
+    emps[mid_leaver]["Employment_Status"] = "Terminated"
+    emps[mid_leaver]["Date_Of_Leaving"] = (last + timedelta(days=14)).isoformat()
+    hris.loc[hris["Employee_ID"] == mid_leaver, ["Employment_Status", "Date_Of_Leaving"]] = \
+        ["Terminated", emps[mid_leaver]["Date_Of_Leaving"]]
+
+    def payable(emp, period):
+        doj = date.fromisoformat(emp["Date_Of_Joining"])
+        dol = date.fromisoformat(emp["Date_Of_Leaving"]) if emp["Date_Of_Leaving"] else None
+        return doj <= month_end(period) and (dol is None or dol >= period) and emp["Base_Salary_HRIS"] > 0
+
+    structures = {e: salary_structure(rng, r["Base_Salary_HRIS"]) for e, r in emps.items()}
+    ot_by = {}
+    rows = {p: [] for p in periods}
+    for p in periods:
+        for eid, emp in emps.items():
+            if not payable(emp, p):
+                continue
+            base = emp["Base_Salary_HRIS"]
+            ot = min(round(rng.uniform(300, 1200), 2), 0.08 * base) if rng.random() < 0.25 else 0.0
+            ot_by[(eid, p)] = ot
+            rows[p].append(_row(emp, p, base, components(structures[eid], base, ot)))
+
+    # ------------------- inject faults into the LAST period -------------------
+    prev = periods[-2] if len(periods) > 1 else None
+    quiet = [r["Employee_ID"] for r in rows[last]
+             if r["Employee_ID"] != mid_leaver
+             and ot_by[(r["Employee_ID"], last)] == 0
+             and (prev is None or ot_by.get((r["Employee_ID"], prev), 0) == 0)
+             and (prev is None or any(x["Employee_ID"] == r["Employee_ID"] for x in rows[prev]))]
+    rng.shuffle(quiet)
+    take = lambda k: [quiet.pop() for _ in range(k)]   # noqa: E731  distinct employees per fault
+    e3_ids, e7_ids, e8_ids, e6_ids, e5_ids, e4_ids = take(3), take(1), take(1), take(1), take(2), take(2)
+    by_id = {r["Employee_ID"]: r for r in rows[last]}
+
+    # E3 base rate mismatch: payroll base 8-12% above HRIS, components rebuilt on the new base
+    for eid in e3_ids:
+        new_base = round(emps[eid]["Base_Salary_HRIS"] * rng.uniform(1.08, 1.12), 2)
+        by_id[eid].update({"Base_Salary_Payroll": new_base, **components(structures[eid], new_base)})
+    # E7 40% jump: special allowance + 40% of base (base itself untouched -> not a rate mismatch)
+    for eid in e7_ids:
+        b = emps[eid]["Base_Salary_HRIS"]
+        by_id[eid].update(components(structures[eid], b, extra=round(0.40 * b, 2)))
+    # E8 overtime anomaly: overtime = 60% of basic
+    for eid in e8_ids:
+        b = emps[eid]["Base_Salary_HRIS"]
+        ot = round(0.60 * round(b * structures[eid]["basic_pct"], 2), 2)
+        by_id[eid].update(components(structures[eid], b, ot=ot))
+    # E6 duplicate: identical regular row posted twice in the same run
+    for eid in e6_ids:
+        rows[last].append(copy.deepcopy(by_id[eid]))
+    # E4 manual adjustments
+    for k, eid in enumerate(e4_ids, 1):
+        amt = round(rng.uniform(3000, 15000), 2)
+        comp = {c: 0.0 for c in components(structures[eid], 1)}
+        comp.update({"Special_Allowance": amt, "Gross_Pay": amt, "Net_Pay": amt})
+        rows[last].append(_row(emps[eid], last, 0.0, comp, "Manual_Adjustment",
+                               f"ADJ_{last:%Y%m}_{k:02d}", "Manual off-cycle adjustment"))
+    # E1 terminated employees (left before the first period) still paid
+    leavers = [e for e, r in emps.items()
+               if r["Employment_Status"] == "Terminated" and e != mid_leaver and r["Base_Salary_HRIS"] > 0]
+    e1_ids = sorted(rng.sample(leavers, min(2, len(leavers))))
+    for eid in e1_ids:
+        b = emps[eid]["Base_Salary_HRIS"]
+        rows[last].append(_row(emps[eid], last, b, components(structures[eid], b)))
+    # E2 orphans (ghost employees)
+    ghosts = ["E9901", "E9902"]
+    for gid in ghosts:
+        b = round(rng.uniform(25000, 60000), 2)
+        ghost = {"Employee_ID": gid, "Employee_Name": f"Ghost Employee {gid}",
+                 "Department": rng.choice(DEPARTMENTS)}
+        rows[last].append(_row(ghost, last, b, components(salary_structure(rng, b), b)))
+
+    payroll = pd.DataFrame([r for p in periods for r in rows[p]])
+    faults = {"E1": e1_ids, "E2": ghosts, "E3": e3_ids, "E4": e4_ids, "E5": e5_ids,
+              "E6": e6_ids, "E7": e7_ids, "E8": e8_ids, "mid_month_leaver": mid_leaver}
+    return payroll, faults
+
+
+def generate_gl(payroll: pd.DataFrame, rng: random.Random, last: date, e5_ids: list[str]) -> pd.DataFrame:
+    """GL mirrors payroll net pay row for row; only E5 employees are posted wrongly."""
+    out = []
+    for n, row in enumerate(payroll.to_dict("records"), 1):
+        wrong = row["Pay_Period"] == last.isoformat() and row["Employee_ID"] in e5_ids \
+            and row["Payment_Mode"] == "Bank_Transfer"
+        amount = round(row["Net_Pay"] * rng.uniform(1.03, 1.08), 2) if wrong else row["Net_Pay"]
+        out.append({
+            "GL_Entry_ID": f"GL{n:06d}", "Employee_ID": row["Employee_ID"],
+            "Department": row["Department"], "Pay_Period": row["Pay_Period"],
+            "GL_Account_Code": rng.choice(GL_ACCOUNTS), "GL_Amount_Posted": amount,
             "Payroll_Net_Pay_Reference": row["Net_Pay"],
-            "Posting_Date": f"{row['Pay_Period']}-28",
-            "Posted_By": rng.choice(["finance_auto_sync", "accounts_officer_01", "accounts_officer_02"]),
-            "GL_Remarks": gl_remark,
+            "Posting_Date": row["Pay_Period"][:8] + "28", "Posted_By": rng.choice(GL_USERS),
+            "GL_Remarks": "Posting_Discrepancy" if wrong else "Auto_Posted",
         })
+    return pd.DataFrame(out)
 
-    return pd.DataFrame(records)
+
+def expected_findings(faults: dict) -> dict:
+    """What the reconciliation engine must report for the last period (ground truth)."""
+    return {
+        "CRITICAL_TERMINATED_PAID": sorted(faults["E1"]),
+        "ORPHAN_PAYROLL_RECORD": sorted(faults["E2"]),
+        "BASE_RATE_MISMATCH": sorted(faults["E3"]),
+        "OFF_CYCLE_MANUAL_ADJ": sorted(faults["E4"]),
+        "GL_NET_MISMATCH": sorted(faults["E5"]),
+        "DUPLICATE_PAYMENT": sorted(faults["E6"]),
+        # a doubled payment, a 40% jump and a 60%-of-basic overtime all move gross by >15%
+        "MOM_VARIANCE": sorted(set(faults["E6"] + faults["E7"] + faults["E8"])),
+        "OT_ANOMALY": sorted(faults["E8"]),
+        "HEADCOUNT_MISMATCH": 1,   # HRIS active vs payroll paid differs (leavers + ghosts paid)
+        "_note": "ESI_BOUNDARY_RISK is natural (low-pay roles) and is not part of the exact check",
+    }
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
+def generate_all(employees: int, last_month: str, months: int, seed: int, output_dir) -> dict:
+    rng = random.Random(seed)
+    last = month_start(last_month)
+    periods = [add_months(last, -(months - 1 - i)) for i in range(months)]
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    hris = generate_hris(employees, rng, periods[0])
+    payroll, faults = generate_payroll(hris, periods, rng)
+    gl = generate_gl(payroll, rng, last, faults["E5"])
+
+    hris.to_csv(out / "hris_export.csv", index=False)
+    payroll.to_csv(out / "payroll_register.csv", index=False)
+    gl.to_csv(out / "gl_dump.csv", index=False)
+    manifest = {"seed": seed, "periods": [p.isoformat() for p in periods],
+                "fault_period": last.isoformat(), "faults": faults,
+                "expected": expected_findings(faults),
+                "rows": {"hris": len(hris), "payroll": len(payroll), "gl": len(gl)}}
+    (out / "injected_faults.json").write_text(json.dumps(manifest, indent=2))
+    return manifest
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate mock hospital payroll CSVs")
-    parser.add_argument("--employees", type=int, default=80,
-                        help="Number of employees to generate (default: 80)")
-    parser.add_argument("--month", type=str, default="2024-10",
-                        help="Pay period in YYYY-MM format (default: 2024-10)")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--output-dir", type=str, default="data/incoming_feeds",
-                        help="Output directory for CSVs")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Generate mock hospital payroll CSVs")
+    ap.add_argument("--employees", type=int, default=80)
+    ap.add_argument("--month", default="2024-10", help="LAST pay period, YYYY-MM")
+    ap.add_argument("--months", type=int, default=3, help="consecutive months to generate")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--output-dir", default="src/data/incoming_feeds")
+    a = ap.parse_args()
 
-    rng = random.Random(args.seed)
-    np.random.seed(args.seed)
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Generating mock data: {args.employees} employees, period {args.month}, seed {args.seed}")
-    print("-" * 60)
-
-    # Generate HRIS
-    print("  [1/3] Generating HRIS export...")
-    hris_df = generate_hris(args.employees, rng)
-    hris_path = output_dir / "hris_export.csv"
-    hris_df.to_csv(hris_path, index=False)
-    print(f"        Saved → {hris_path}  ({len(hris_df)} records)")
-
-    # Generate Payroll Register
-    print("  [2/3] Generating Payroll Register...")
-    payroll_df = generate_payroll(hris_df, args.month, rng)
-    payroll_path = output_dir / "payroll_register.csv"
-    payroll_df.to_csv(payroll_path, index=False)
-    print(f"        Saved → {payroll_path}  ({len(payroll_df)} records)")
-
-    # Generate GL Dump
-    print("  [3/3] Generating GL Dump...")
-    gl_df = generate_gl(payroll_df, rng)
-    gl_path = output_dir / "gl_dump.csv"
-    gl_df.to_csv(gl_path, index=False)
-    print(f"        Saved → {gl_path}  ({len(gl_df)} records)")
-
-    # Summary of injected errors
-    print()
-    print("Injected errors summary:")
-    print("-" * 60)
-
-    terminated_paid = hris_df[hris_df["Employment_Status"] == "Terminated"]["Employee_ID"].tolist()
-    e1_caught = payroll_df[payroll_df["Employee_ID"].isin(terminated_paid)]
-    print(f"  E1 CRITICAL_TERMINATED_PAID  : {len(e1_caught)} record(s)")
-    print(f"     IDs: {e1_caught['Employee_ID'].tolist()}")
-
-    hris_ids = set(hris_df["Employee_ID"])
-    e2_caught = payroll_df[~payroll_df["Employee_ID"].isin(hris_ids) &
-                            ~payroll_df["Employee_ID"].str.startswith("E990")]
-    orphans = payroll_df[payroll_df["Employee_ID"].str.startswith("E990")]
-    print(f"  E2 ORPHAN_PAYROLL_RECORD     : {len(orphans)} record(s)")
-    print(f"     IDs: {orphans['Employee_ID'].tolist()}")
-
-    print(f"  E3 BASE_RATE_MISMATCH        : ~3 records (salary tampered 8-15%)")
-    manual_adj = payroll_df[payroll_df["Payment_Mode"] == "Manual_Adjustment"]
-    print(f"  E4 OFF_CYCLE_MANUAL_ADJ      : {len(manual_adj)} record(s)")
-    gl_mismatch = gl_df[gl_df["GL_Amount_Posted"] != gl_df["Payroll_Net_Pay_Reference"]]
-    print(f"  E5 GL_NET_MISMATCH           : {len(gl_mismatch)} record(s)")
-    print()
-    print("Run your reconciliation engine on these files to catch all 5 error types.")
-    print(f"Output directory: {output_dir.resolve()}")
+    m = generate_all(a.employees, a.month, a.months, a.seed, a.output_dir)
+    print(f"Periods: {m['periods']}  seed={a.seed}  rows={m['rows']}")
+    print(f"Faults injected into {m['fault_period']}:")
+    for k, v in m["expected"].items():
+        if not k.startswith("_"):
+            print(f"  {k:26s} {v}")
+    print(f"Ground truth written to {Path(a.output_dir) / 'injected_faults.json'}")
 
 
 if __name__ == "__main__":
